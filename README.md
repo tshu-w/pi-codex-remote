@@ -12,7 +12,7 @@ pi install git:github.com/tshu-w/pi-codex-remote
 
 Run in a Pi terminal:
 
-- `/codex-remote pair`: start the background daemon and show a pairing QR code
+- `/codex-remote pair`: start the background daemon and show the full pairing QR code, manual code and expiry above the editor
 - `/codex-remote start`: start the daemon with the existing pairing
 - `/codex-remote status`: show the daemon and connection state
 - `/codex-remote stop`: stop the daemon

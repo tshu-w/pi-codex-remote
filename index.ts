@@ -1,4 +1,5 @@
 import { resizeImage, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import QRCode from "qrcode";
 import { control, start } from "./src/daemon.mjs";
 import { createLiveSessionRegistry } from "./src/live-sessions.mjs";
@@ -49,13 +50,13 @@ export default function codexRemote(pi: ExtensionAPI) {
           await start();
           const pairing = await control("pair");
           const qr = await QRCode.toString(pairing.url, { type: "terminal", small: true });
-          ctx.ui.setWidget("codex-remote-pair", [
+          ctx.ui.setWidget("codex-remote-pair", () => new Text([
             "Codex Remote · scan with your phone",
             ...qr.trimEnd().split("\n"),
             `Manual code: ${pairing.manualCode || "unavailable"}`,
             `Expires: ${pairing.expiresAt}`,
             "Remote tasks run with Pi's local permissions. No Codex sandbox is applied.",
-          ]);
+          ].join("\n"), 1, 0));
           return;
         }
         if (action === "stop") {
