@@ -1,0 +1,758 @@
+{
+  "version": "0.160.0",
+  "requests": {
+    "initialize": {
+      "response": "#/definitions/InitializeResponse",
+      "experimental": false
+    },
+    "server/diagnostics": {
+      "response": "#/definitions/v2/ServerDiagnosticsResponse",
+      "experimental": true
+    },
+    "userVerification/status": {
+      "response": "#/definitions/v2/UserVerificationStatusResponse",
+      "experimental": true
+    },
+    "userVerification/enroll": {
+      "response": "#/definitions/v2/UserVerificationEnrollResponse",
+      "experimental": true
+    },
+    "userVerification/delete": {
+      "response": "#/definitions/v2/UserVerificationDeleteResponse",
+      "experimental": true
+    },
+    "userVerification/verify": {
+      "response": "#/definitions/v2/UserVerificationVerifyResponse",
+      "experimental": true
+    },
+    "userVerification/cancel": {
+      "response": "#/definitions/v2/UserVerificationCancelResponse",
+      "experimental": true
+    },
+    "thread/start": {
+      "response": "#/definitions/v2/ThreadStartResponse",
+      "experimental": false
+    },
+    "thread/resume": {
+      "response": "#/definitions/v2/ThreadResumeResponse",
+      "experimental": false
+    },
+    "thread/fork": {
+      "response": "#/definitions/v2/ThreadForkResponse",
+      "experimental": false
+    },
+    "thread/archive": {
+      "response": "#/definitions/v2/ThreadArchiveResponse",
+      "experimental": false
+    },
+    "thread/delete": {
+      "response": "#/definitions/v2/ThreadDeleteResponse",
+      "experimental": false
+    },
+    "thread/unsubscribe": {
+      "response": "#/definitions/v2/ThreadUnsubscribeResponse",
+      "experimental": false
+    },
+    "thread/increment_elicitation": {
+      "response": "#/definitions/v2/ThreadIncrementElicitationResponse",
+      "experimental": true
+    },
+    "thread/decrement_elicitation": {
+      "response": "#/definitions/v2/ThreadDecrementElicitationResponse",
+      "experimental": true
+    },
+    "thread/name/set": {
+      "response": "#/definitions/v2/ThreadSetNameResponse",
+      "experimental": false
+    },
+    "thread/goal/set": {
+      "response": "#/definitions/v2/ThreadGoalSetResponse",
+      "experimental": false
+    },
+    "thread/goal/get": {
+      "response": "#/definitions/v2/ThreadGoalGetResponse",
+      "experimental": false
+    },
+    "thread/goal/clear": {
+      "response": "#/definitions/v2/ThreadGoalClearResponse",
+      "experimental": false
+    },
+    "thread/queue/add": {
+      "response": "#/definitions/v2/ThreadQueueAddResponse",
+      "experimental": true
+    },
+    "thread/queue/list": {
+      "response": "#/definitions/v2/ThreadQueueListResponse",
+      "experimental": true
+    },
+    "thread/queue/update": {
+      "response": "#/definitions/v2/ThreadQueueUpdateResponse",
+      "experimental": true
+    },
+    "thread/queue/delete": {
+      "response": "#/definitions/v2/ThreadQueueDeleteResponse",
+      "experimental": true
+    },
+    "thread/queue/reorder": {
+      "response": "#/definitions/v2/ThreadQueueReorderResponse",
+      "experimental": true
+    },
+    "thread/queue/start": {
+      "response": "#/definitions/v2/ThreadQueueStartResponse",
+      "experimental": true
+    },
+    "thread/metadata/update": {
+      "response": "#/definitions/v2/ThreadMetadataUpdateResponse",
+      "experimental": false
+    },
+    "thread/attachment/add": {
+      "response": "#/definitions/v2/ThreadAttachmentAddResponse",
+      "experimental": false
+    },
+    "thread/attachment/list": {
+      "response": "#/definitions/v2/ThreadAttachmentListResponse",
+      "experimental": false
+    },
+    "thread/attachment/remove": {
+      "response": "#/definitions/v2/ThreadAttachmentRemoveResponse",
+      "experimental": false
+    },
+    "thread/section/move": {
+      "response": "#/definitions/v2/ThreadSectionMoveResponse",
+      "experimental": false
+    },
+    "thread/settings/update": {
+      "response": "#/definitions/v2/ThreadSettingsUpdateResponse",
+      "experimental": true
+    },
+    "thread/memoryMode/set": {
+      "response": "#/definitions/v2/ThreadMemoryModeSetResponse",
+      "experimental": true
+    },
+    "memory/status": {
+      "response": "#/definitions/v2/MemoryStatusResponse",
+      "experimental": true
+    },
+    "memory/reset": {
+      "response": "#/definitions/v2/MemoryResetResponse",
+      "experimental": true
+    },
+    "rollout/compress": {
+      "response": "#/definitions/v2/RolloutCompressResponse",
+      "experimental": true
+    },
+    "thread/unarchive": {
+      "response": "#/definitions/v2/ThreadUnarchiveResponse",
+      "experimental": false
+    },
+    "thread/compact/start": {
+      "response": "#/definitions/v2/ThreadCompactStartResponse",
+      "experimental": false
+    },
+    "thread/shellCommand": {
+      "response": "#/definitions/v2/ThreadShellCommandResponse",
+      "experimental": false
+    },
+    "thread/approveGuardianDeniedAction": {
+      "response": "#/definitions/v2/ThreadApproveGuardianDeniedActionResponse",
+      "experimental": false
+    },
+    "thread/backgroundTerminals/clean": {
+      "response": "#/definitions/v2/ThreadBackgroundTerminalsCleanResponse",
+      "experimental": true
+    },
+    "thread/backgroundTerminals/list": {
+      "response": "#/definitions/v2/ThreadBackgroundTerminalsListResponse",
+      "experimental": true
+    },
+    "thread/backgroundTerminals/terminate": {
+      "response": "#/definitions/v2/ThreadBackgroundTerminalsTerminateResponse",
+      "experimental": true
+    },
+    "thread/revert": {
+      "response": "#/definitions/v2/ThreadRevertResponse",
+      "experimental": false
+    },
+    "thread/list": {
+      "response": "#/definitions/v2/ThreadListResponse",
+      "experimental": false
+    },
+    "project/list": {
+      "response": "#/definitions/v2/ProjectListResponse",
+      "experimental": true
+    },
+    "project/read": {
+      "response": "#/definitions/v2/ProjectReadResponse",
+      "experimental": true
+    },
+    "project/create": {
+      "response": "#/definitions/v2/ProjectCreateResponse",
+      "experimental": true
+    },
+    "project/import": {
+      "response": "#/definitions/v2/ProjectImportResponse",
+      "experimental": true
+    },
+    "project/update": {
+      "response": "#/definitions/v2/ProjectUpdateResponse",
+      "experimental": true
+    },
+    "project/move": {
+      "response": "#/definitions/v2/ProjectMoveResponse",
+      "experimental": true
+    },
+    "project/delete": {
+      "response": "#/definitions/v2/ProjectDeleteResponse",
+      "experimental": true
+    },
+    "threadSection/list": {
+      "response": "#/definitions/v2/ThreadSectionListResponse",
+      "experimental": false
+    },
+    "threadSection/create": {
+      "response": "#/definitions/v2/ThreadSectionCreateResponse",
+      "experimental": false
+    },
+    "threadSection/update": {
+      "response": "#/definitions/v2/ThreadSectionUpdateResponse",
+      "experimental": false
+    },
+    "threadSection/delete": {
+      "response": "#/definitions/v2/ThreadSectionDeleteResponse",
+      "experimental": false
+    },
+    "thread/search": {
+      "response": "#/definitions/v2/ThreadSearchResponse",
+      "experimental": true
+    },
+    "thread/searchOccurrences": {
+      "response": "#/definitions/v2/ThreadSearchOccurrencesResponse",
+      "experimental": true
+    },
+    "thread/loaded/list": {
+      "response": "#/definitions/v2/ThreadLoadedListResponse",
+      "experimental": false
+    },
+    "thread/read": {
+      "response": "#/definitions/v2/ThreadReadResponse",
+      "experimental": false
+    },
+    "thread/turns/list": {
+      "response": "#/definitions/v2/ThreadTurnsListResponse",
+      "experimental": false
+    },
+    "thread/items/list": {
+      "response": "#/definitions/v2/ThreadItemsListResponse",
+      "experimental": false
+    },
+    "thread/inject_items": {
+      "response": "#/definitions/v2/ThreadInjectItemsResponse",
+      "experimental": false
+    },
+    "skills/list": {
+      "response": "#/definitions/v2/SkillsListResponse",
+      "experimental": false
+    },
+    "skills/extraRoots/set": {
+      "response": "#/definitions/v2/SkillsExtraRootsSetResponse",
+      "experimental": false
+    },
+    "hooks/list": {
+      "response": "#/definitions/v2/HooksListResponse",
+      "experimental": false
+    },
+    "marketplace/add": {
+      "response": "#/definitions/v2/MarketplaceAddResponse",
+      "experimental": false
+    },
+    "marketplace/remove": {
+      "response": "#/definitions/v2/MarketplaceRemoveResponse",
+      "experimental": false
+    },
+    "marketplace/upgrade": {
+      "response": "#/definitions/v2/MarketplaceUpgradeResponse",
+      "experimental": false
+    },
+    "plugin/list": {
+      "response": "#/definitions/v2/PluginListResponse",
+      "experimental": false
+    },
+    "plugin/search": {
+      "response": "#/definitions/v2/PluginSearchResponse",
+      "experimental": true
+    },
+    "plugin/installed": {
+      "response": "#/definitions/v2/PluginInstalledResponse",
+      "experimental": false
+    },
+    "plugin/reconcile": {
+      "response": "#/definitions/v2/PluginReconcileResponse",
+      "experimental": false
+    },
+    "plugin/read": {
+      "response": "#/definitions/v2/PluginReadResponse",
+      "experimental": false
+    },
+    "plugin/skill/read": {
+      "response": "#/definitions/v2/PluginSkillReadResponse",
+      "experimental": false
+    },
+    "plugin/share/save": {
+      "response": "#/definitions/v2/PluginShareSaveResponse",
+      "experimental": false
+    },
+    "plugin/share/updateTargets": {
+      "response": "#/definitions/v2/PluginShareUpdateTargetsResponse",
+      "experimental": false
+    },
+    "plugin/share/list": {
+      "response": "#/definitions/v2/PluginShareListResponse",
+      "experimental": false
+    },
+    "plugin/share/checkout": {
+      "response": "#/definitions/v2/PluginShareCheckoutResponse",
+      "experimental": false
+    },
+    "plugin/share/delete": {
+      "response": "#/definitions/v2/PluginShareDeleteResponse",
+      "experimental": false
+    },
+    "app/read": {
+      "response": "#/definitions/v2/AppsReadResponse",
+      "experimental": false
+    },
+    "app/list": {
+      "response": "#/definitions/v2/AppsListResponse",
+      "experimental": false
+    },
+    "app/installed": {
+      "response": "#/definitions/v2/AppsInstalledResponse",
+      "experimental": false
+    },
+    "fs/readFile": {
+      "response": "#/definitions/v2/FsReadFileResponse",
+      "experimental": false
+    },
+    "fs/writeFile": {
+      "response": "#/definitions/v2/FsWriteFileResponse",
+      "experimental": false
+    },
+    "fs/createDirectory": {
+      "response": "#/definitions/v2/FsCreateDirectoryResponse",
+      "experimental": false
+    },
+    "fs/getMetadata": {
+      "response": "#/definitions/v2/FsGetMetadataResponse",
+      "experimental": false
+    },
+    "fs/readDirectory": {
+      "response": "#/definitions/v2/FsReadDirectoryResponse",
+      "experimental": false
+    },
+    "fs/remove": {
+      "response": "#/definitions/v2/FsRemoveResponse",
+      "experimental": false
+    },
+    "fs/copy": {
+      "response": "#/definitions/v2/FsCopyResponse",
+      "experimental": false
+    },
+    "fs/watch": {
+      "response": "#/definitions/v2/FsWatchResponse",
+      "experimental": false
+    },
+    "fs/unwatch": {
+      "response": "#/definitions/v2/FsUnwatchResponse",
+      "experimental": false
+    },
+    "skills/config/write": {
+      "response": "#/definitions/v2/SkillsConfigWriteResponse",
+      "experimental": false
+    },
+    "plugin/install": {
+      "response": "#/definitions/v2/PluginInstallResponse",
+      "experimental": false
+    },
+    "plugin/uninstall": {
+      "response": "#/definitions/v2/PluginUninstallResponse",
+      "experimental": false
+    },
+    "turn/start": {
+      "response": "#/definitions/v2/TurnStartResponse",
+      "experimental": false
+    },
+    "turn/settings/update": {
+      "response": "#/definitions/v2/TurnSettingsUpdateResponse",
+      "experimental": true
+    },
+    "turn/steer": {
+      "response": "#/definitions/v2/TurnSteerResponse",
+      "experimental": false
+    },
+    "turn/interrupt": {
+      "response": "#/definitions/v2/TurnInterruptResponse",
+      "experimental": false
+    },
+    "thread/realtime/start": {
+      "response": "#/definitions/v2/ThreadRealtimeStartResponse",
+      "experimental": true
+    },
+    "thread/realtime/appendAudio": {
+      "response": "#/definitions/v2/ThreadRealtimeAppendAudioResponse",
+      "experimental": true
+    },
+    "thread/realtime/appendText": {
+      "response": "#/definitions/v2/ThreadRealtimeAppendTextResponse",
+      "experimental": true
+    },
+    "thread/realtime/appendSpeech": {
+      "response": "#/definitions/v2/ThreadRealtimeAppendSpeechResponse",
+      "experimental": true
+    },
+    "thread/realtime/stop": {
+      "response": "#/definitions/v2/ThreadRealtimeStopResponse",
+      "experimental": true
+    },
+    "thread/timeline/list": {
+      "response": "#/definitions/v2/ThreadTimelineListResponse",
+      "experimental": true
+    },
+    "thread/realtime/listVoices": {
+      "response": "#/definitions/v2/ThreadRealtimeListVoicesResponse",
+      "experimental": true
+    },
+    "review/start": {
+      "response": "#/definitions/v2/ReviewStartResponse",
+      "experimental": false
+    },
+    "model/list": {
+      "response": "#/definitions/v2/ModelListResponse",
+      "experimental": false
+    },
+    "account/gatewayOAuth/read": {
+      "response": "#/definitions/v2/GatewayOAuthReadResponse",
+      "experimental": false
+    },
+    "account/gatewayOAuth/login": {
+      "response": "#/definitions/v2/GatewayOAuthLoginResponse",
+      "experimental": false
+    },
+    "account/gatewayOAuth/cancel": {
+      "response": "#/definitions/v2/GatewayOAuthCancelResponse",
+      "experimental": false
+    },
+    "modelProvider/capabilities/read": {
+      "response": "#/definitions/v2/ModelProviderCapabilitiesReadResponse",
+      "experimental": false
+    },
+    "experimentalFeature/list": {
+      "response": "#/definitions/v2/ExperimentalFeatureListResponse",
+      "experimental": false
+    },
+    "permissionProfile/list": {
+      "response": "#/definitions/v2/PermissionProfileListResponse",
+      "experimental": false
+    },
+    "experimentalFeature/enablement/set": {
+      "response": "#/definitions/v2/ExperimentalFeatureEnablementSetResponse",
+      "experimental": false
+    },
+    "remoteControl/enable": {
+      "response": "#/definitions/v2/RemoteControlEnableResponse",
+      "experimental": true
+    },
+    "remoteControl/disable": {
+      "response": "#/definitions/v2/RemoteControlDisableResponse",
+      "experimental": true
+    },
+    "remoteControl/status/read": {
+      "response": "#/definitions/v2/RemoteControlStatusReadResponse",
+      "experimental": true
+    },
+    "remoteControl/pairing/start": {
+      "response": "#/definitions/v2/RemoteControlPairingStartResponse",
+      "experimental": true
+    },
+    "remoteControl/pairing/status": {
+      "response": "#/definitions/v2/RemoteControlPairingStatusResponse",
+      "experimental": true
+    },
+    "remoteControl/client/list": {
+      "response": "#/definitions/v2/RemoteControlClientsListResponse",
+      "experimental": true
+    },
+    "remoteControl/client/revoke": {
+      "response": "#/definitions/v2/RemoteControlClientsRevokeResponse",
+      "experimental": true
+    },
+    "collaborationMode/list": {
+      "response": "#/definitions/v2/CollaborationModeListResponse",
+      "experimental": true
+    },
+    "mock/experimentalMethod": {
+      "response": "#/definitions/v2/MockExperimentalMethodResponse",
+      "experimental": true
+    },
+    "environment/add": {
+      "response": "#/definitions/v2/EnvironmentAddResponse",
+      "experimental": true
+    },
+    "environment/info": {
+      "response": "#/definitions/v2/EnvironmentInfoResponse",
+      "experimental": true
+    },
+    "environment/status": {
+      "response": "#/definitions/v2/EnvironmentStatusResponse",
+      "experimental": true
+    },
+    "mcpServer/oauth/login": {
+      "response": "#/definitions/v2/McpServerOauthLoginResponse",
+      "experimental": false
+    },
+    "config/mcpServer/reload": {
+      "response": "#/definitions/v2/McpServerRefreshResponse",
+      "experimental": false
+    },
+    "mcpServerStatus/list": {
+      "response": "#/definitions/v2/ListMcpServerStatusResponse",
+      "experimental": false
+    },
+    "mcpServer/resource/read": {
+      "response": "#/definitions/v2/McpResourceReadResponse",
+      "experimental": false
+    },
+    "mcpServer/event/stream/start": {
+      "response": "#/definitions/v2/McpServerEventStreamStartResponse",
+      "experimental": true
+    },
+    "mcpServer/event/stream/stop": {
+      "response": "#/definitions/v2/McpServerEventStreamStopResponse",
+      "experimental": true
+    },
+    "mcpServer/tool/call": {
+      "response": "#/definitions/v2/McpServerToolCallResponse",
+      "experimental": false
+    },
+    "windowsSandbox/setupStart": {
+      "response": "#/definitions/v2/WindowsSandboxSetupStartResponse",
+      "experimental": false
+    },
+    "windowsSandbox/readiness": {
+      "response": "#/definitions/v2/WindowsSandboxReadinessResponse",
+      "experimental": false
+    },
+    "account/login/start": {
+      "response": "#/definitions/v2/LoginAccountResponse",
+      "experimental": false
+    },
+    "account/bedrock/discover": {
+      "response": "#/definitions/v2/BedrockDiscoverResponse",
+      "experimental": true
+    },
+    "account/bedrock/setup": {
+      "response": "#/definitions/v2/BedrockSetupResponse",
+      "experimental": true
+    },
+    "account/login/cancel": {
+      "response": "#/definitions/v2/CancelLoginAccountResponse",
+      "experimental": false
+    },
+    "account/logout": {
+      "response": "#/definitions/v2/LogoutAccountResponse",
+      "experimental": false
+    },
+    "account/rateLimits/read": {
+      "response": "#/definitions/v2/GetAccountRateLimitsResponse",
+      "experimental": false
+    },
+    "account/rateLimitResetCredit/consume": {
+      "response": "#/definitions/v2/ConsumeAccountRateLimitResetCreditResponse",
+      "experimental": false
+    },
+    "account/usage/read": {
+      "response": "#/definitions/v2/GetAccountTokenUsageResponse",
+      "experimental": false
+    },
+    "account/workspaceMessages/read": {
+      "response": "#/definitions/v2/GetWorkspaceMessagesResponse",
+      "experimental": false
+    },
+    "account/sendAddCreditsNudgeEmail": {
+      "response": "#/definitions/v2/SendAddCreditsNudgeEmailResponse",
+      "experimental": false
+    },
+    "feedback/upload": {
+      "response": "#/definitions/v2/FeedbackUploadResponse",
+      "experimental": false
+    },
+    "command/exec": {
+      "response": "#/definitions/v2/CommandExecResponse",
+      "experimental": false
+    },
+    "command/exec/write": {
+      "response": "#/definitions/v2/CommandExecWriteResponse",
+      "experimental": false
+    },
+    "command/exec/terminate": {
+      "response": "#/definitions/v2/CommandExecTerminateResponse",
+      "experimental": false
+    },
+    "command/exec/resize": {
+      "response": "#/definitions/v2/CommandExecResizeResponse",
+      "experimental": false
+    },
+    "process/spawn": {
+      "response": "#/definitions/v2/ProcessSpawnResponse",
+      "experimental": true
+    },
+    "process/writeStdin": {
+      "response": "#/definitions/v2/ProcessWriteStdinResponse",
+      "experimental": true
+    },
+    "process/kill": {
+      "response": "#/definitions/v2/ProcessKillResponse",
+      "experimental": true
+    },
+    "process/resizePty": {
+      "response": "#/definitions/v2/ProcessResizePtyResponse",
+      "experimental": true
+    },
+    "config/read": {
+      "response": "#/definitions/v2/ConfigReadResponse",
+      "experimental": false
+    },
+    "externalAgentConfig/detect": {
+      "response": "#/definitions/v2/ExternalAgentConfigDetectResponse",
+      "experimental": false
+    },
+    "externalAgentConfig/import": {
+      "response": "#/definitions/v2/ExternalAgentConfigImportResponse",
+      "experimental": false
+    },
+    "externalAgentConfig/import/recordHistory": {
+      "response": "#/definitions/v2/ExternalAgentConfigImportHistoryRecordResponse",
+      "experimental": false
+    },
+    "externalAgentConfig/import/readHistories": {
+      "response": "#/definitions/v2/ExternalAgentConfigImportHistoriesReadResponse",
+      "experimental": false
+    },
+    "config/value/write": {
+      "response": "#/definitions/v2/ConfigWriteResponse",
+      "experimental": false
+    },
+    "config/batchWrite": {
+      "response": "#/definitions/v2/ConfigWriteResponse",
+      "experimental": false
+    },
+    "configRequirements/read": {
+      "response": "#/definitions/v2/ConfigRequirementsReadResponse",
+      "experimental": false
+    },
+    "account/read": {
+      "response": "#/definitions/v2/GetAccountResponse",
+      "experimental": false
+    },
+    "fuzzyFileSearch": {
+      "response": "#/definitions/FuzzyFileSearchResponse",
+      "experimental": false
+    },
+    "fuzzyFileSearch/sessionStart": {
+      "response": "#/definitions/FuzzyFileSearchSessionStartResponse",
+      "experimental": true
+    },
+    "fuzzyFileSearch/sessionUpdate": {
+      "response": "#/definitions/FuzzyFileSearchSessionUpdateResponse",
+      "experimental": true
+    },
+    "fuzzyFileSearch/sessionStop": {
+      "response": "#/definitions/FuzzyFileSearchSessionStopResponse",
+      "experimental": true
+    }
+  },
+  "notifications": {
+    "error": "#/definitions/v2/ErrorNotification",
+    "thread/started": "#/definitions/v2/ThreadStartedNotification",
+    "thread/status/changed": "#/definitions/v2/ThreadStatusChangedNotification",
+    "thread/archived": "#/definitions/v2/ThreadArchivedNotification",
+    "thread/deleted": "#/definitions/v2/ThreadDeletedNotification",
+    "thread/unarchived": "#/definitions/v2/ThreadUnarchivedNotification",
+    "thread/closed": "#/definitions/v2/ThreadClosedNotification",
+    "thread/reverted": "#/definitions/v2/ThreadRevertedNotification",
+    "skills/changed": "#/definitions/v2/SkillsChangedNotification",
+    "thread/name/updated": "#/definitions/v2/ThreadNameUpdatedNotification",
+    "thread/attachment/updated": "#/definitions/v2/ThreadAttachmentUpdatedNotification",
+    "thread/goal/updated": "#/definitions/v2/ThreadGoalUpdatedNotification",
+    "thread/goal/cleared": "#/definitions/v2/ThreadGoalClearedNotification",
+    "thread/queue/changed": "#/definitions/v2/ThreadQueueChangedNotification",
+    "project/changed": "#/definitions/v2/ProjectChangedNotification",
+    "thread/project/updated": "#/definitions/v2/ThreadProjectUpdatedNotification",
+    "thread/environment/connected": "#/definitions/v2/EnvironmentConnectionNotification",
+    "thread/environment/disconnected": "#/definitions/v2/EnvironmentConnectionNotification",
+    "thread/settings/updated": "#/definitions/v2/ThreadSettingsUpdatedNotification",
+    "thread/tokenUsage/updated": "#/definitions/v2/ThreadTokenUsageUpdatedNotification",
+    "turn/started": "#/definitions/v2/TurnStartedNotification",
+    "hook/started": "#/definitions/v2/HookStartedNotification",
+    "turn/completed": "#/definitions/v2/TurnCompletedNotification",
+    "hook/completed": "#/definitions/v2/HookCompletedNotification",
+    "turn/diff/updated": "#/definitions/v2/TurnDiffUpdatedNotification",
+    "turn/plan/updated": "#/definitions/v2/TurnPlanUpdatedNotification",
+    "item/started": "#/definitions/v2/ItemStartedNotification",
+    "item/autoApprovalReview/started": "#/definitions/v2/ItemGuardianApprovalReviewStartedNotification",
+    "item/autoApprovalReview/completed": "#/definitions/v2/ItemGuardianApprovalReviewCompletedNotification",
+    "autoApprovalReview/strictReviewRequired": "#/definitions/v2/StrictReviewRequiredNotification",
+    "item/completed": "#/definitions/v2/ItemCompletedNotification",
+    "item/agentMessage/delta": "#/definitions/v2/AgentMessageDeltaNotification",
+    "item/plan/delta": "#/definitions/v2/PlanDeltaNotification",
+    "command/exec/outputDelta": "#/definitions/v2/CommandExecOutputDeltaNotification",
+    "process/outputDelta": "#/definitions/v2/ProcessOutputDeltaNotification",
+    "process/exited": "#/definitions/v2/ProcessExitedNotification",
+    "item/commandExecution/outputDelta": "#/definitions/v2/CommandExecutionOutputDeltaNotification",
+    "item/commandExecution/terminalInteraction": "#/definitions/v2/TerminalInteractionNotification",
+    "item/fileChange/outputDelta": "#/definitions/v2/FileChangeOutputDeltaNotification",
+    "item/fileChange/patchUpdated": "#/definitions/v2/FileChangePatchUpdatedNotification",
+    "serverRequest/resolved": "#/definitions/v2/ServerRequestResolvedNotification",
+    "item/mcpToolCall/progress": "#/definitions/v2/McpToolCallProgressNotification",
+    "mcpServer/oauthLogin/completed": "#/definitions/v2/McpServerOauthLoginCompletedNotification",
+    "mcpServer/startupStatus/updated": "#/definitions/v2/McpServerStatusUpdatedNotification",
+    "mcpServer/event/stream/notification": "#/definitions/v2/McpServerEventStreamNotification",
+    "account/updated": "#/definitions/v2/AccountUpdatedNotification",
+    "account/gatewayOAuth/changed": "#/definitions/v2/GatewayOAuthChangedNotification",
+    "account/rateLimits/updated": "#/definitions/v2/AccountRateLimitsUpdatedNotification",
+    "app/list/updated": "#/definitions/v2/AppListUpdatedNotification",
+    "remoteControl/status/changed": "#/definitions/v2/RemoteControlStatusChangedNotification",
+    "externalAgentConfig/import/progress": "#/definitions/v2/ExternalAgentConfigImportProgressNotification",
+    "externalAgentConfig/import/completed": "#/definitions/v2/ExternalAgentConfigImportCompletedNotification",
+    "fs/changed": "#/definitions/v2/FsChangedNotification",
+    "item/reasoning/summaryTextDelta": "#/definitions/v2/ReasoningSummaryTextDeltaNotification",
+    "item/reasoning/summaryPartAdded": "#/definitions/v2/ReasoningSummaryPartAddedNotification",
+    "item/reasoning/textDelta": "#/definitions/v2/ReasoningTextDeltaNotification",
+    "thread/compacted": "#/definitions/v2/ContextCompactedNotification",
+    "model/rerouted": "#/definitions/v2/ModelReroutedNotification",
+    "model/verification": "#/definitions/v2/ModelVerificationNotification",
+    "modelProvider/authRecoveryStarted": "#/definitions/v2/AuthRecoveryNotification",
+    "modelProvider/authRecoveryCompleted": "#/definitions/v2/AuthRecoveryNotification",
+    "turn/moderationMetadata": "#/definitions/v2/TurnModerationMetadataNotification",
+    "model/safetyBuffering/updated": "#/definitions/v2/ModelSafetyBufferingUpdatedNotification",
+    "warning": "#/definitions/v2/WarningNotification",
+    "guardianWarning": "#/definitions/v2/GuardianWarningNotification",
+    "deprecationNotice": "#/definitions/v2/DeprecationNoticeNotification",
+    "configWarning": "#/definitions/v2/ConfigWarningNotification",
+    "fuzzyFileSearch/sessionUpdated": "#/definitions/FuzzyFileSearchSessionUpdatedNotification",
+    "fuzzyFileSearch/sessionCompleted": "#/definitions/FuzzyFileSearchSessionCompletedNotification",
+    "thread/realtime/started": "#/definitions/v2/ThreadRealtimeStartedNotification",
+    "thread/realtime/itemAdded": "#/definitions/v2/ThreadRealtimeItemAddedNotification",
+    "thread/realtime/item/started": "#/definitions/v2/ThreadRealtimeItemStartedNotification",
+    "thread/realtime/item/transcript/delta": "#/definitions/v2/ThreadRealtimeItemTranscriptDeltaNotification",
+    "thread/realtime/item/completed": "#/definitions/v2/ThreadRealtimeItemCompletedNotification",
+    "thread/realtime/transcript/delta": "#/definitions/v2/ThreadRealtimeTranscriptDeltaNotification",
+    "thread/realtime/transcript/done": "#/definitions/v2/ThreadRealtimeTranscriptDoneNotification",
+    "thread/realtime/outputAudio/delta": "#/definitions/v2/ThreadRealtimeOutputAudioDeltaNotification",
+    "thread/realtime/sdp": "#/definitions/v2/ThreadRealtimeSdpNotification",
+    "thread/realtime/error": "#/definitions/v2/ThreadRealtimeErrorNotification",
+    "thread/realtime/closed": "#/definitions/v2/ThreadRealtimeClosedNotification",
+    "windows/worldWritableWarning": "#/definitions/v2/WindowsWorldWritableWarningNotification",
+    "windowsSandbox/setupCompleted": "#/definitions/v2/WindowsSandboxSetupCompletedNotification",
+    "account/login/completed": "#/definitions/v2/AccountLoginCompletedNotification"
+  }
+}

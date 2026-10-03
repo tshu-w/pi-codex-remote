@@ -1,0 +1,86 @@
+import assert from 'node:assert/strict';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import test from 'node:test';
+import { model, setup, waitFor } from './harness.mjs';
+
+const image = { type: 'image', url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==' };
+const input = text => [{ type: 'text', text, text_elements: [] }];
+
+test('durable queue edits, ordering, selected start, interruption and resume', { timeout: 120000 }, async t => {
+  const f = await setup(t);
+  const first = f.start();
+  const { client, protocol } = first;
+  const { thread } = await client.request('thread/start', { cwd: f.cwd, model });
+  const threadId = thread.id;
+  const { turn } = await client.request('turn/start', { threadId, input: input('hold') });
+  await client.notification('item/agentMessage/delta', p => p.turnId === turn.id);
+  const add = async (text, id) => (await client.request('thread/queue/add', { threadId, input: input(text), clientUserMessageId: id })).queuedSubmission;
+  const a = await add('first', 'client-a');
+  const b = await add('second', 'client-b');
+  const c = (await client.request('thread/queue/add', { threadId, input: [...input('third'), image], clientUserMessageId: 'client-c' })).queuedSubmission;
+  const unsupported = await client.raw('thread/queue/add', { threadId, input: [{ type: 'localImage', path: '/tmp/not-durable.png' }], clientUserMessageId: 'bad' });
+  assert.match(unsupported.error.message, /Temporary uploads/);
+  const updated = await client.request('thread/queue/update', { threadId, queuedSubmissionId: a.id, input: input('edited') });
+  assert.equal(updated.queuedSubmission.clientUserMessageId, 'client-a');
+  assert.equal(updated.queuedSubmission.id, a.id);
+  const invalidOrder = await client.raw('thread/queue/reorder', { threadId, queuedSubmissionIds: [a.id, a.id, c.id] });
+  assert.match(invalidOrder.error.message, /exactly once/);
+  await client.request('thread/queue/reorder', { threadId, queuedSubmissionIds: [c.id, a.id, b.id] });
+  const page = await client.request('thread/queue/list', { threadId, limit: 2 });
+  assert.deepEqual(page.data.map(item => item.id), [c.id, a.id]);
+  assert.deepEqual((await client.request('thread/queue/list', { threadId, cursor: page.nextCursor })).data.map(item => item.id), [b.id]);
+  assert.deepEqual(await client.request('thread/queue/delete', { threadId, queuedSubmissionId: b.id }), { deleted: true });
+  assert.deepEqual(await client.request('thread/queue/delete', { threadId, queuedSubmissionId: b.id }), { deleted: false });
+  assert.match((await client.raw('thread/queue/start', { threadId })).error.message, /active|running|idle/i);
+  await client.request('turn/interrupt', { threadId, turnId: turn.id });
+  await client.notification('turn/completed', p => p.turn.id === turn.id);
+  assert.deepEqual((await client.request('thread/queue/list', { threadId })).data.map(item => item.id), [c.id, a.id]);
+  assert.equal((await f.calls()).length, 1, 'interruption does not start queued inputs');
+  const selected = await client.request('thread/queue/start', { threadId, queuedSubmissionId: a.id });
+  await client.notification('turn/completed', p => p.turn.id === selected.turn.id);
+  await waitFor(async () => (await f.calls()).length === 3 && !protocol.active.has(threadId), 'queue drains');
+  assert.deepEqual((await f.calls()).map(call => call.prompt), ['hold', 'edited', 'third']);
+  assert.deepEqual((await f.calls()).at(-1).images, [image.url.split(',')[1]]);
+  const users = client.records.filter(r => r.method === 'item/completed' && r.params.item.type === 'userMessage');
+  assert.deepEqual(users.slice(-2).map(r => r.params.item.clientId), ['client-a', 'client-c']);
+  assert.ok(client.records.some(r => r.method === 'thread/queue/changed'));
+  const held = await client.request('turn/start', { threadId, input: input('hold') });
+  await client.notification('item/agentMessage/delta', p => p.turnId === held.turn.id);
+  const persisted = (await client.request('thread/queue/add', { threadId, input: [...input('after-restart'), image], clientUserMessageId: 'client-restart' })).queuedSubmission;
+  await client.request('turn/interrupt', { threadId, turnId: held.turn.id });
+  await protocol.close();
+  const second = f.start();
+  assert.deepEqual((await second.client.request('thread/queue/list', { threadId })).data.map(item => item.id), [persisted.id]);
+  assert.match((await second.client.raw('thread/queue/start', { threadId })).error.message, /resume/i);
+  await second.client.request('thread/resume', { threadId, excludeTurns: true });
+  await waitFor(async () => (await f.calls()).some(call => call.prompt === 'after-restart') && !second.protocol.active.has(threadId), 'resume drains durable queue');
+  assert.deepEqual((await second.client.request('thread/queue/list', { threadId })).data, []);
+  assert.equal((await f.calls()).at(-1).images.at(-1), image.url.split(',')[1]);
+});
+
+test('dispatch uncertainty survives restart and requires explicit deletion', { timeout: 120000 }, async t => {
+  const f = await setup(t);
+  const first = f.start();
+  const { thread } = await first.client.request('thread/start', { cwd: f.cwd, model });
+  const threadId = thread.id;
+  await first.client.turn(threadId, 'seed');
+  await first.protocol.close();
+  // Simulate a crash after intent persistence, before the prompt outcome was recorded.
+  const path = join(f.root, 'remote-state', 'threads.json');
+  const meta = JSON.parse(await readFile(path, 'utf8'));
+  meta.queues = { [threadId]: { items: [{ id: 'uncertain', clientUserMessageId: 'uncertain-client', input: input('must-not-repeat') }],
+    paused: false, intent: { queuedSubmissionId: 'uncertain', turnId: 'uncertain-turn' } } };
+  await writeFile(path, JSON.stringify(meta));
+  const second = f.start();
+  await second.client.request('thread/resume', { threadId, excludeTurns: true });
+  const blocked = await second.client.raw('thread/queue/start', { threadId });
+  assert.match(blocked.error.message, /uncertain.*history.*delete/i);
+  assert.deepEqual((await f.calls()).map(call => call.prompt), ['seed']);
+  assert.equal((await second.client.request('thread/queue/list', { threadId })).data[0].id, 'uncertain');
+  await second.client.request('thread/queue/delete', { threadId, queuedSubmissionId: 'uncertain' });
+  const added = await second.client.request('thread/queue/add', { threadId, clientUserMessageId: 'recreated', input: input('safe-replacement') });
+  await waitFor(async () => (await f.calls()).length === 2 && !second.protocol.active.has(threadId), 'recreated input runs once');
+  assert.equal((await f.calls()).at(-1).prompt, 'safe-replacement');
+  assert.ok(added.queuedSubmission.id);
+});
