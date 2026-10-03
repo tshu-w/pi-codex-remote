@@ -5,6 +5,7 @@ import { hostname, homedir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import WebSocket from 'ws';
+import { Agent } from 'undici';
 import { protocolMethods } from './schema.mjs';
 
 const BASE = 'https://chatgpt.com/backend-api/wham/remote/control/';
@@ -44,6 +45,7 @@ export class Remote {
     this.clients = new Map();
     this.closedStreams = new Set();
     this.stopController = new AbortController();
+    this.dispatcher = new Agent({ allowH2: false });
     this.status = 'stopped';
     this.saving = Promise.resolve();
   }
@@ -71,6 +73,7 @@ export class Remote {
     const response = await this.fetchImpl(`${BASE}${endpoint}`, {
       method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body), signal: AbortSignal.any([AbortSignal.timeout(30000), this.stopController.signal]),
+      dispatcher: this.dispatcher,
     });
     if (!response.ok) throw new Error(`Codex Remote relay ${endpoint}: HTTP ${response.status}`);
     return response.json();
@@ -358,5 +361,6 @@ export class Remote {
     if (socket) setTimeout(() => socket.terminate(), 1000).unref();
     await Promise.allSettled(this.tasks);
     await this.saving;
+    await this.dispatcher.destroy();
   }
 }

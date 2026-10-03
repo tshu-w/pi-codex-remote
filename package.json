@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "Use Pi remotely through ChatGPT's Codex remote control",
   "type": "module",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/tshu-w/pi-codex-remote.git"
@@ -12,7 +14,9 @@
     "test": "node --import ./tests/schema-strict.mjs --test tests/*.test.mjs"
   },
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
@@ -22,6 +26,7 @@
     "entities": "7.0.0",
     "marked": "18.0.11",
     "qrcode": "1.5.4",
+    "undici": "8.10.2",
     "ws": "8.22.0"
   }
 }
