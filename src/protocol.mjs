@@ -225,13 +225,16 @@ export class Protocol {
       } else merged.push(turn);
     }
     const active = this.active.get(threadId);
+    for (const turn of merged) {
+      if (turn.status === 'inProgress' && turn.id !== active?.turn.id) turn.status = 'interrupted';
+    }
     if (active) {
       const current = merged.find(turn => turn.id === active.turn.id);
       const items = new Map([...(current?.items ?? []), ...active.turn.items].map(item => [item.id, item]));
       const live = { ...structuredClone(active.turn), items: structuredClone([...items.values()]), status: 'inProgress', error: null, completedAt: null, durationMs: null };
       if (current) Object.assign(current, live);
       else merged.push(live);
-    } else if (this.meta.owned?.[threadId] && merged.at(-1)?.status === 'inProgress') merged.at(-1).status = 'interrupted';
+    }
     return merged;
   }
 
