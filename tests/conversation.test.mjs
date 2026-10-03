@@ -18,18 +18,21 @@ test('a phone conversation runs native tools, keeps Pi permissions and survives 
   const read = await phone.turn(thread.id, 'read input.txt', { clientUserMessageId: 'phone-1' });
   assert.equal(read.status, 'completed');
   assert.equal(read.items.at(-1).text, 'done:read');
-  const readTool = phone.records.find(record => record.method === 'item/completed' && record.params.item.type === 'dynamicToolCall');
-  assert.equal(readTool.params.item.success, true);
+  const readTool = phone.records.find(record => record.method === 'item/completed' && record.params.item.type === 'commandExecution');
+  assert.equal(readTool.params.item.status, 'completed');
+  assert.equal(readTool.params.item.commandActions[0].type, 'read');
+  assert.equal(readTool.params.item.commandActions[0].path, join(f.cwd, 'input.txt'));
+  assert.equal(readTool.params.item.aggregatedOutput, 'fixture-data\n');
   const users = phone.records.filter(record => record.method === 'item/completed' && record.params.item.type === 'userMessage');
   assert.deepEqual(users.map(record => record.params.item.clientId), ['phone-1']);
   assert.ok(phone.records.indexOf(users[0]) < phone.records.indexOf(readTool), 'user item precedes tool output');
 
   const bash = await phone.turn(thread.id, 'bash printf native-bash');
   assert.equal(bash.status, 'completed');
-  const command = phone.records.find(record => record.method === 'item/completed' && record.params.item.type === 'commandExecution');
+  const command = phone.records.find(record => record.method === 'item/completed' && record.params.item.type === 'commandExecution' && record.params.item.commandActions.length === 0);
   assert.equal(command.params.item.aggregatedOutput, 'native-bash');
   assert.equal(command.params.item.exitCode, 0);
-  assert.equal(phone.records.filter(record => record.method === 'item/commandExecution/outputDelta').map(record => record.params.delta).join(''), 'native-bash');
+  assert.equal(phone.records.filter(record => record.method === 'item/commandExecution/outputDelta' && record.params.itemId === command.params.item.id).map(record => record.params.delta).join(''), 'native-bash');
 
   // The fixture's permission hook asks for confirmation; Remote cancels Pi dialogs.
   const write = await phone.turn(thread.id, 'write blocked.txt');

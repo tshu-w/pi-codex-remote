@@ -68,4 +68,13 @@ export function inputPrompt(input = [], attachments, owner) {
   if (!text.length && !images.length) throw invalid('Input cannot be empty.');
   return { message: text.join('\n\n'), ...(images.length ? { images } : {}) };
 }
-export const agentItem = (id, text = '') => ({ type: 'agentMessage', id, text, phase: null, delivery: null, memoryCitation: null });
+export function textPhase(block) {
+  if (typeof block?.textSignature !== 'string') return null;
+  try {
+    const signature = JSON.parse(block.textSignature);
+    return signature?.v === 1 && typeof signature.id === 'string' && ['commentary', 'final_answer'].includes(signature.phase) ? signature.phase : null;
+  } catch {
+    return null;
+  }
+}
+export const agentItem = (id, text = '', phase = null) => ({ type: 'agentMessage', id, text, phase, delivery: null, memoryCitation: null });

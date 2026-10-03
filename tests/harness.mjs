@@ -27,11 +27,23 @@ export default function (pi) {
   let release;
   pi.registerCommand('fixture-release', { description: 'Release a held reply', handler: async () => release?.() });
   pi.on('tool_call', async (event, ctx) => {
-    if (event.toolName === 'write' && !(await ctx.ui.confirm('Fixture permission', 'Allow write?'))) return { block: true, reason: 'Fixture write denied' };
+    if (event.toolName === 'write' && event.input.path === 'blocked.txt' && !(await ctx.ui.confirm('Fixture permission', 'Allow write?'))) return { block: true, reason: 'Fixture write denied' };
   });
   pi.on('session_before_compact', async event => ({ compaction: {
     summary: 'Fixture compaction', firstKeptEntryId: event.preparation.firstKeptEntryId, tokensBefore: event.preparation.tokensBefore,
   } }));
+  pi.registerTool({ name: 'mcp__fixture__lookup', label: 'Fixture lookup', description: 'Fixture MCP result',
+    parameters: { type: 'object', properties: {} },
+    async execute() { return { content: [{ type: 'text', text: 'lookup result' }], details: { server: 'fixture-server', tool: 'lookup-original' } }; },
+  });
+  pi.registerTool({ name: 'nested', label: 'Nested fixture', description: 'Exercise nested calls',
+    parameters: { type: 'object', properties: {} },
+    async execute(_id, _args, _signal, _update, ctx) {
+      await ctx.executeTool('read', { path: 'input.txt' });
+      await ctx.executeTool('mcp__fixture__lookup', {});
+      return { content: [{ type: 'text', text: 'nested done' }] };
+    },
+  });
   pi.registerProvider('fixture', {
     api: 'fixture-api', apiKey: 'fixture-only', baseUrl: 'https://invalid.invalid',
     models: [{ id: 'scripted', name: 'Scripted fixture', reasoning: false, input: ['text', 'image'],
@@ -50,6 +62,7 @@ export default function (pi) {
           message.content[0].text += part;
           push({ type: 'text_delta', contentIndex: 0, delta: part, partial: message });
         }
+        message.content[0].textSignature = JSON.stringify({ v: 1, id: 'fixture-answer', phase: 'final_answer' });
         push({ type: 'text_end', contentIndex: 0, content: message.content[0].text, partial: message });
         message.stopReason = 'stop';
       };
@@ -63,12 +76,20 @@ export default function (pi) {
           const result = context.messages.slice(last + 1).find(value => value.role === 'toolResult');
           const [tool, ...rest] = prompt.split(' ');
           push({ type: 'start', partial: message });
-          if (['read', 'write', 'bash'].includes(tool) && !result) {
-            const args = tool === 'bash' ? { command: rest.join(' ') } : tool === 'read' ? { path: rest[0] } : { path: rest[0], content: 'written' };
+          if (['read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'mcp__fixture__lookup', 'nested'].includes(tool) && !result) {
+            const args = tool === 'bash' ? { command: rest.join(' ') }
+              : tool === 'write' ? { path: rest[0], content: rest.slice(1).join(' ') || 'written' }
+              : tool === 'edit' ? { path: rest[0], edits: [{ oldText: 'written', newText: 'edited' }] }
+              : tool === 'grep' ? { pattern: rest[0], path: '.' }
+              : tool === 'find' ? { pattern: rest[0], path: '.' }
+              : ['read', 'ls'].includes(tool) ? { path: rest[0] || '.' } : {};
             const call = { type: 'toolCall', id: 'fixture-' + Date.now(), name: tool, arguments: args };
+            message.content.push({ type: 'text', text: 'Working on it.', textSignature: JSON.stringify({ v: 1, id: 'fixture-comment', phase: 'commentary' }) });
+            push({ type: 'text_start', contentIndex: 0, partial: message });
+            push({ type: 'text_end', contentIndex: 0, content: 'Working on it.', partial: message });
             message.content.push(call);
-            push({ type: 'toolcall_start', contentIndex: 0, partial: message });
-            push({ type: 'toolcall_end', contentIndex: 0, toolCall: call, partial: message });
+            push({ type: 'toolcall_start', contentIndex: 1, partial: message });
+            push({ type: 'toolcall_end', contentIndex: 1, toolCall: call, partial: message });
             message.stopReason = 'toolUse';
           } else if (result) await say('done:' + tool);
           else if (prompt === 'hold') await say('held', () => new Promise(resolve => {
@@ -159,7 +180,7 @@ export async function setup(t) {
       args: ['-i', `PATH=${process.env.PATH}`, `HOME=${dirs.home}`, `XDG_STATE_HOME=${dirs.state}`,
         `PI_CODING_AGENT_DIR=${dirs.config}`, `PI_CODING_AGENT_SESSION_DIR=${dirs.sessions}`, `FIXTURE_CALLS=${calls}`,
         'PI_OFFLINE=1', 'PI_SKIP_VERSION_CHECK=1', 'PI_TELEMETRY=0', 'PI_CODEX_REMOTE_RPC=1',
-        'pi', '--no-extensions', '-e', remoteExtension, '-e', extension, '--no-skills', '--no-prompt-templates',
+        'pi', '--tools', 'read,bash,edit,write,grep,find,ls,mcp__fixture__lookup,nested', '--no-extensions', '-e', remoteExtension, '-e', extension, '--no-skills', '--no-prompt-templates',
         '--no-themes', '--no-context-files', '--session-dir', dirs.sessions],
       requestTimeoutMs: 30000, shutdownTimeoutMs: 1000,
     });

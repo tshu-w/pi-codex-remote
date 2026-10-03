@@ -2,6 +2,7 @@ import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { toolItem, updateToolItem } from './items.mjs';
+import { agentItem, textPhase } from './codex.mjs';
 
 // Budgets account for retained payloads; entry limits also bound Map/object overhead.
 function boundedCache(maxEntries, maxBytes) {
@@ -189,15 +190,27 @@ function userContent(content) {
     : { type: 'text', text: block.text, text_elements: [] });
 }
 
-function agentItem(id, text) {
-  return { type: 'agentMessage', id, text, phase: null, delivery: null, memoryCitation: null };
-}
-
 export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = {}, cwd = '' } = {}) {
   const turns = [];
   let turn;
   const tools = new Map();
-  for (const entry of activeBranch(entries, leafId)) {
+  const inputs = new Map();
+  const branch = activeBranch(entries, leafId);
+  const nestedItems = new Map(branch.filter(entry => entry.type === 'custom' && entry.customType === 'codex-remote-tool')
+    .map(entry => [entry.data.item.id, entry.data]));
+  for (const entry of branch) {
+    if (entry.type === 'custom' && entry.customType === 'codex-remote-tool') {
+      const saved = entry.data;
+      let parent = saved.parentToolCallId;
+      while (nestedItems.has(parent)) parent = nestedItems.get(parent).parentToolCallId;
+      const owner = [...turns, turn].find(candidate => candidate?.items.some(item => item.id === parent));
+      if (owner && !owner.items.some(item => item.id === saved.item.id)) {
+        const item = structuredClone(saved.item);
+        owner.items.push(item);
+        tools.set(item.id, item);
+      }
+      continue;
+    }
     const message = entry.type === 'message' ? entry.message : undefined;
     const role = message?.role;
     if (role === 'system') continue;
@@ -220,11 +233,12 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
     } else if (role === 'assistant') {
       for (const [index, block] of (message.content || []).entries()) {
         const id = `${entry.id}:${index}`;
-        if (block.type === 'text') turn.items.push(agentItem(id, block.text));
+        if (block.type === 'text') turn.items.push(agentItem(id, block.text, textPhase(block)));
         else if (block.type === 'thinking') turn.items.push({ type: 'reasoning', id, content: [block.thinking], summary: [] });
         else if (block.type === 'toolCall') {
           const item = toolItem(block.id, block.name, block.arguments, { cwd, namespace: block.namespace });
           tools.set(block.id, item);
+          inputs.set(block.id, { name: block.name, args: block.arguments });
           turn.items.push(item);
         }
       }
@@ -241,13 +255,14 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
         tools.set(message.toolCallId, item);
         turn.items.push(item);
       }
-      updateToolItem(item, message, { complete: true, isError: message.isError });
+      updateToolItem(item, message, { complete: true, isError: message.isError, cwd, ...inputs.get(message.toolCallId) });
       for (const call of message.nestedCalls?.calls ?? []) {
         if (tools.has(call.id)) continue;
-        const nested = toolItem(call.id, call.name, call.arguments ?? null, { cwd });
+        const saved = nestedItems.get(call.id);
+        const nested = saved ? structuredClone(saved.item) : toolItem(call.id, call.name, call.arguments ?? null, { cwd });
         if (call.status !== 'unfinished') {
           nested.status = call.status === 'ok' ? 'completed' : 'failed';
-          nested.durationMs = call.durationMs ?? null;
+          if (nested.type !== 'fileChange') nested.durationMs = call.durationMs ?? null;
           if (nested.type === 'dynamicToolCall') nested.success = call.status === 'ok';
         }
         tools.set(call.id, nested);

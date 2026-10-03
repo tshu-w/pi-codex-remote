@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { commandOutputDelta, toolItem, updateToolItem } from '../items.mjs';
-import { seconds, invalid, applyEffort, workspaceSettings, executionSettings, providerSettings, modelIdentity, inputPrompt, agentItem } from '../codex.mjs';
+import { seconds, invalid, applyEffort, workspaceSettings, executionSettings, providerSettings, modelIdentity, inputPrompt, agentItem, textPhase } from '../codex.mjs';
 import { turnView } from '../pages.mjs';
 
 export const turnsHandlers = {
@@ -311,9 +311,10 @@ export const turnsMethods = {
       let item = active.blocks.get(update.contentIndex);
       if (!item) {
         const id = `${active.turn.id}:assistant:${Math.max(0, active.messageIndex)}:${update.contentIndex}`;
-        item = this.startItem(active, thinking ? { type: 'reasoning', id, content: [''], summary: [] } : agentItem(id));
+        item = this.startItem(active, thinking ? { type: 'reasoning', id, content: [''], summary: [] } : agentItem(id, '', textPhase(update.partial?.content?.[update.contentIndex])));
         active.blocks.set(update.contentIndex, item);
       }
+      if (!thinking) item.phase = textPhase(update.partial?.content?.[update.contentIndex]);
       if (update.type.endsWith('_delta')) {
         if (thinking) item.content[0] += update.delta;
         else item.text += update.delta;
@@ -329,10 +330,10 @@ export const turnsMethods = {
         let item = active.blocks.get(index);
         if (!item) {
           const id = `${active.turn.id}:assistant:${Math.max(0, active.messageIndex)}:${index}`;
-          item = this.startItem(active, content.type === 'text' ? agentItem(id) : { type: 'reasoning', id, content: [''], summary: [] });
+          item = this.startItem(active, content.type === 'text' ? agentItem(id, '', textPhase(content)) : { type: 'reasoning', id, content: [''], summary: [] });
           active.blocks.set(index, item);
         }
-        if (content.type === 'text') item.text = content.text;
+        if (content.type === 'text') { item.text = content.text; item.phase = textPhase(content); }
         else item.content[0] = content.thinking;
         this.completeItem(active, item);
       }
@@ -340,8 +341,11 @@ export const turnsMethods = {
       active.error = message.stopReason === 'error' ? message.errorMessage ?? 'Pi model request failed' : undefined;
       active.interrupted ||= message.stopReason === 'aborted';
     } else if (event.type === 'tool_execution_start') {
-      const item = this.startItem(active, toolItem(event.toolCallId, event.toolName, event.args, { cwd: rpc.cwd }));
+      const item = toolItem(event.toolCallId, event.toolName, event.args, { cwd: rpc.cwd });
+      // These cards need the result to distinguish images, patches and real MCP identities.
+      if (!['read', 'edit', 'write'].includes(event.toolName) && !event.toolName.startsWith('mcp__')) this.startItem(active, item);
       active.tools.set(event.toolCallId, item);
+      (active.toolInputs ??= new Map()).set(item.id, { name: event.toolName, args: event.args });
       (active.toolStartedAt ??= new Map()).set(item.id, Date.now());
     } else if (event.type === 'tool_execution_update' || event.type === 'tool_execution_end') {
       const item = active.tools.get(event.toolCallId);
@@ -349,15 +353,17 @@ export const turnsMethods = {
       const complete = event.type === 'tool_execution_end';
       const previousOutput = item.aggregatedOutput ?? '';
       updateToolItem(item, complete ? event.result : event.partialResult, {
-        complete, isError: event.isError,
+        complete, isError: event.isError, cwd: rpc.cwd, ...active.toolInputs?.get(item.id),
         durationMs: Date.now() - (active.toolStartedAt?.get(item.id) ?? Date.now()),
       });
-      if (item.type === 'commandExecution') {
+      if (complete && !active.turn.items.some(existing => existing.id === item.id)) this.startItem(active, item);
+      if (item.type === 'commandExecution' && active.turn.items.some(existing => existing.id === item.id)) {
         const delta = commandOutputDelta(previousOutput, item.aggregatedOutput);
         if (delta) this.notify(rpc.id, 'item/commandExecution/outputDelta', { threadId: rpc.id, turnId: active.turn.id, itemId: item.id, delta });
       }
       if (complete) {
         active.toolStartedAt?.delete(item.id);
+        active.toolInputs?.delete(item.id);
         this.completeItem(active, item);
       }
     } else if (event.type === 'agent_settled') {
@@ -371,7 +377,8 @@ export const turnsMethods = {
         if (active.completed.has(item.id)) continue;
         item.status = 'failed';
         if (item.type === 'dynamicToolCall') item.success = false;
-        item.durationMs = Date.now() - (active.toolStartedAt?.get(item.id) ?? Date.now());
+        if (item.type !== 'fileChange') item.durationMs = Date.now() - (active.toolStartedAt?.get(item.id) ?? Date.now());
+        if (!active.turn.items.some(existing => existing.id === item.id)) this.startItem(active, item);
         this.completeItem(active, item);
       }
       this.finishNotification(active);
