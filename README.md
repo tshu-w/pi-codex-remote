@@ -24,6 +24,7 @@ Pairing requires a Codex login on the machine running Pi. State and logs default
 - Tasks and `!` commands use Pi's local permissions and extensions, without Codex sandboxing. Direct commands from the app run in the official Codex sandbox without network access.
 - Remote turns do not support Pi dialogs; confirmation, selection and input requests are cancelled.
 - Sessions open in another Pi are read-only. Once closed there, sending a task takes the session over.
+- Native subagent cards support [pi-agents](https://github.com/tshu-w/pi-agents). Subagent sessions are read-only; manage them from their parent session.
 - Archiving and deleting move session files to the macOS Trash. Unarchiving restores them; deleting also removes the thread from Remote.
 
 See [METHODS.md](METHODS.md) for supported interfaces.

@@ -36,9 +36,10 @@ export function registerToolPresentation(pi, generateUnifiedPatch) {
     const args = nested.get(event.toolCallId);
     nested.delete(event.toolCallId);
     // Persist the final post-hook result; nestedCalls itself omits results from history.
-    const item = toolItem(event.toolCallId, event.toolName, args, { cwd: ctx.cwd });
+    const senderThreadId = ctx.sessionManager.getSessionId();
+    const item = toolItem(event.toolCallId, event.toolName, args, { cwd: ctx.cwd, senderThreadId });
     updateToolItem(item, event.result, { complete: true, isError: event.isError,
-      name: event.toolName, args, cwd: ctx.cwd });
+      name: event.toolName, args, cwd: ctx.cwd, senderThreadId });
     pi.appendEntry('codex-remote-tool', { parentToolCallId: event.parentToolCallId, item });
   });
   pi.on('agent_settled', () => { writes.clear(); nested.clear(); });

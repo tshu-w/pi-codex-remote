@@ -19,6 +19,8 @@ const remoteExtension = fileURLToPath(new URL('../index.ts', import.meta.url));
 //   anything else answers "echo:" plus every user text in context, joined by "|"
 const providerSource = `
 import { appendFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 
 const text = content => typeof content === 'string' ? content : content.filter(b => b.type === 'text').map(b => b.text).join('');
@@ -42,6 +44,38 @@ export default function (pi) {
       await ctx.executeTool('read', { path: 'input.txt' });
       await ctx.executeTool('mcp__fixture__lookup', {});
       return { content: [{ type: 'text', text: 'nested done' }] };
+    },
+  });
+  const children = new Map();
+  pi.registerTool({ name: 'agent', label: 'Fixture agent', description: 'Offline pi-agents contract fixture',
+    parameters: { type: 'object', properties: { action: { type: 'string' }, name: { type: 'string' }, target: {}, message: { type: 'string' }, deliverAs: { type: 'string' } }, required: ['action'] },
+    async execute(_id, args, _signal, _update, ctx) {
+      let details;
+      if (args.action === 'spawn') {
+        const child = SessionManager.create(ctx.cwd, join(ctx.sessionManager.getSessionDir(), 'subagents'), { parentSession: ctx.sessionManager.getSessionFile() });
+        const ownerId = ctx.sessionManager.getSessionId();
+        child.appendCustomEntry('pi-agents-tree', { rootId: ownerId, ownerId, scopeId: ownerId });
+        child.appendSessionInfo(args.name);
+        child.appendModelChange('fixture', 'scripted');
+        child.appendMessage({ role: 'user', content: args.message, timestamp: Date.now() });
+        child.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'child:' + args.name }], api: 'fixture-api', provider: 'fixture', model: 'scripted', stopReason: 'stop', timestamp: Date.now(),
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+        children.set(args.name, child.getSessionId());
+        details = { id: child.getSessionId(), name: args.name, queued: false };
+      } else {
+        const ids = [args.target].flat().map(target => children.get(target) ?? target);
+        details = args.action === 'abort' ? { id: ids[0], aborted: true }
+          : args.action === 'send' ? (args.deliverAs === 'write' ? { ids } : { id: ids[0], queued: false })
+          : args.action === 'wait' ? { results: ['First result', 'Second result'].map(result => ({ id: children.get('researcher'), name: 'researcher', state: 'completed', history: false, result })), pending: [] }
+          : { total: children.size, agents: [...children].map(([name, id]) => ({ id, name, ownerId: ctx.sessionManager.getSessionId(), state: 'idle' })) };
+      }
+      const label = id => [...children].find(([, value]) => value === id)?.[0] + ' (' + id.slice(0, 8) + ')';
+      const output = args.action === 'spawn' ? 'Agent ' + label(details.id) + ' started.'
+        : args.action === 'abort' ? 'Agent ' + label(details.id) + ' aborted.'
+        : args.action === 'send' ? (args.deliverAs === 'write' ? 'Write accepted by ' + details.ids.map(label).join(', ') : 'Input accepted by ' + label(details.id)) + '.'
+        : args.action === 'wait' ? details.results.map(result => '<agent-result name="' + result.name + '" id="' + result.id.slice(0, 8) + '" status="' + result.state + '">\\n' + result.result + '\\n</agent-result>').join('\\n\\n')
+        : details.agents.map(agent => label(agent.id) + '  ' + agent.state + '  ' + ctx.cwd).join('\\n');
+      return { content: [{ type: 'text', text: output + (args.message === 'Hooked' ? '\\nAdditional hook output' : '') }], details: args.message === 'Legacy' ? undefined : details };
     },
   });
   pi.registerProvider('fixture', {
@@ -76,8 +110,8 @@ export default function (pi) {
           const result = context.messages.slice(last + 1).find(value => value.role === 'toolResult');
           const [tool, ...rest] = prompt.split(' ');
           push({ type: 'start', partial: message });
-          if (['read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'mcp__fixture__lookup', 'nested'].includes(tool) && !result) {
-            const args = tool === 'bash' ? { command: rest.join(' ') }
+          if (['read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'mcp__fixture__lookup', 'nested', 'agent'].includes(tool) && !result) {
+            const args = tool === 'agent' ? JSON.parse(rest.join(' ')) : tool === 'bash' ? { command: rest.join(' ') }
               : tool === 'write' ? { path: rest[0], content: rest.slice(1).join(' ') || 'written' }
               : tool === 'edit' ? { path: rest[0], edits: [{ oldText: 'written', newText: 'edited' }] }
               : tool === 'grep' ? { pattern: rest[0], path: '.' }
@@ -180,7 +214,7 @@ export async function setup(t) {
       args: ['-i', `PATH=${process.env.PATH}`, `HOME=${dirs.home}`, `XDG_STATE_HOME=${dirs.state}`,
         `PI_CODING_AGENT_DIR=${dirs.config}`, `PI_CODING_AGENT_SESSION_DIR=${dirs.sessions}`, `FIXTURE_CALLS=${calls}`,
         'PI_OFFLINE=1', 'PI_SKIP_VERSION_CHECK=1', 'PI_TELEMETRY=0', 'PI_CODEX_REMOTE_RPC=1',
-        'pi', '--tools', 'read,bash,edit,write,grep,find,ls,mcp__fixture__lookup,nested', '--no-extensions', '-e', remoteExtension, '-e', extension, '--no-skills', '--no-prompt-templates',
+        'pi', '--tools', 'read,bash,edit,write,grep,find,ls,mcp__fixture__lookup,nested,agent', '--no-extensions', '-e', remoteExtension, '-e', extension, '--no-skills', '--no-prompt-templates',
         '--no-themes', '--no-context-files', '--session-dir', dirs.sessions],
       requestTimeoutMs: 30000, shutdownTimeoutMs: 1000,
     });

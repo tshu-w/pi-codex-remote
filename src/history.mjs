@@ -147,12 +147,14 @@ export async function listSessions({ cwd } = {}) {
       const branch = activeBranch(entries);
       const first = branch.find(entry => entry.type === 'message' && entry.message.role === 'user');
       const info = branch.findLast(entry => entry.type === 'session_info');
+      const tree = entries.find(entry => entry.type === 'custom' && entry.customType === 'pi-agents-tree' && typeof entry.data?.rootId === 'string')?.data;
       const summary = {
         id: header.id,
         path,
         cwd: header.cwd,
         parentSession: header.parentSession ?? null,
         isSubAgent: basename(dirname(path)) === 'subagents',
+        agentOwnerId: typeof tree?.ownerId === 'string' ? tree.ownerId : null,
         name: info?.name,
         created: new Date(header.timestamp),
         modified: metadata.mtime,
@@ -190,7 +192,7 @@ function userContent(content) {
     : { type: 'text', text: block.text, text_elements: [] });
 }
 
-export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = {}, cwd = '' } = {}) {
+export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = {}, cwd = '', senderThreadId } = {}) {
   const turns = [];
   let turn;
   const tools = new Map();
@@ -236,7 +238,7 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
         if (block.type === 'text') turn.items.push(agentItem(id, block.text, textPhase(block)));
         else if (block.type === 'thinking') turn.items.push({ type: 'reasoning', id, content: [block.thinking], summary: [] });
         else if (block.type === 'toolCall') {
-          const item = toolItem(block.id, block.name, block.arguments, { cwd, namespace: block.namespace });
+          const item = toolItem(block.id, block.name, block.arguments, { cwd, namespace: block.namespace, senderThreadId });
           tools.set(block.id, item);
           inputs.set(block.id, { name: block.name, args: block.arguments });
           turn.items.push(item);
@@ -251,18 +253,18 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
     } else if (role === 'toolResult') {
       let item = tools.get(message.toolCallId);
       if (!item) {
-        item = toolItem(message.toolCallId, message.toolName, null);
+        item = toolItem(message.toolCallId, message.toolName, null, { cwd, senderThreadId });
         tools.set(message.toolCallId, item);
         turn.items.push(item);
       }
-      updateToolItem(item, message, { complete: true, isError: message.isError, cwd, ...inputs.get(message.toolCallId) });
+      updateToolItem(item, message, { complete: true, isError: message.isError, cwd, senderThreadId, ...inputs.get(message.toolCallId) });
       for (const call of message.nestedCalls?.calls ?? []) {
         if (tools.has(call.id)) continue;
         const saved = nestedItems.get(call.id);
-        const nested = saved ? structuredClone(saved.item) : toolItem(call.id, call.name, call.arguments ?? null, { cwd });
+        const nested = saved ? structuredClone(saved.item) : toolItem(call.id, call.name, call.arguments ?? null, { cwd, senderThreadId });
         if (call.status !== 'unfinished') {
           nested.status = call.status === 'ok' ? 'completed' : 'failed';
-          if (nested.type !== 'fileChange') nested.durationMs = call.durationMs ?? null;
+          if (!['fileChange', 'collabAgentToolCall'].includes(nested.type)) nested.durationMs = call.durationMs ?? null;
           if (nested.type === 'dynamicToolCall') nested.success = call.status === 'ok';
         }
         tools.set(call.id, nested);

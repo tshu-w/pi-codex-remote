@@ -341,9 +341,10 @@ export const turnsMethods = {
       active.error = message.stopReason === 'error' ? message.errorMessage ?? 'Pi model request failed' : undefined;
       active.interrupted ||= message.stopReason === 'aborted';
     } else if (event.type === 'tool_execution_start') {
-      const item = toolItem(event.toolCallId, event.toolName, event.args, { cwd: rpc.cwd });
-      // These cards need the result to distinguish images, patches and real MCP identities.
-      if (!['read', 'edit', 'write'].includes(event.toolName) && !event.toolName.startsWith('mcp__')) this.startItem(active, item);
+      const item = toolItem(event.toolCallId, event.toolName, event.args, { cwd: rpc.cwd, senderThreadId: rpc.id });
+      // These cards need the result to distinguish images, patches and real tool identities.
+      const collab = event.toolName === 'agent' && ['spawn', 'send', 'abort', 'wait', 'list'].includes(event.args?.action);
+      if (!collab && !['read', 'edit', 'write'].includes(event.toolName) && !event.toolName.startsWith('mcp__')) this.startItem(active, item);
       active.tools.set(event.toolCallId, item);
       (active.toolInputs ??= new Map()).set(item.id, { name: event.toolName, args: event.args });
       (active.toolStartedAt ??= new Map()).set(item.id, Date.now());
@@ -353,7 +354,7 @@ export const turnsMethods = {
       const complete = event.type === 'tool_execution_end';
       const previousOutput = item.aggregatedOutput ?? '';
       updateToolItem(item, complete ? event.result : event.partialResult, {
-        complete, isError: event.isError, cwd: rpc.cwd, ...active.toolInputs?.get(item.id),
+        complete, isError: event.isError, cwd: rpc.cwd, senderThreadId: rpc.id, ...active.toolInputs?.get(item.id),
         durationMs: Date.now() - (active.toolStartedAt?.get(item.id) ?? Date.now()),
       });
       if (complete && !active.turn.items.some(existing => existing.id === item.id)) this.startItem(active, item);

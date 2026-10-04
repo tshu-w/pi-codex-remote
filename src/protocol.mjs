@@ -141,10 +141,12 @@ export class Protocol {
       this.catalog.set(id, { ...existing, id, path: rpc.sessionFile, cwd: rpc.cwd, name: rpc.state.sessionName ?? existing?.name, created: existing?.created ?? new Date(), modified: existing?.modified ?? new Date(), firstMessage: existing?.firstMessage ?? '' });
     }
     const paths = new Map(await Promise.all([...this.catalog.values()].filter(record => record.path).map(async record => [await historyPath(this.meta.trashed?.[record.id]?.originalPath ?? record.path), record.id])));
-    for (const record of this.catalog.values()) record.parentSessionId = record.parentSession ? paths.get(await historyPath(record.parentSession)) ?? null : null;
+    for (const record of this.catalog.values()) record.parentSessionId = (record.parentSession ? paths.get(await historyPath(record.parentSession)) : null) ?? (record.isSubAgent ? record.agentOwnerId : null) ?? null;
   }
 
   async rpc(threadId) {
+    await this.discover();
+    if (this.catalog.get(threadId)?.isSubAgent) throw invalid('Sub-agent threads are read-only in Remote.');
     if (this.meta.trashed?.[threadId]) throw invalid('Session is in Trash. Unarchive it before resuming or sending tasks.');
     const cached = this.loaded.get(threadId);
     if (cached && !cached.failure) {
@@ -206,7 +208,7 @@ export class Protocol {
     for (const compaction of running?.compactionMappings ?? []) {
       if (this.mapCompaction(running, compaction.item, compaction.result, entries)) await this.saveMetadata();
     }
-    const turns = this.history.projectTurns(entries, { leafId, entryMappings: this.meta.entries, cwd: rpc?.cwd ?? this.catalog.get(threadId)?.cwd });
+    const turns = this.history.projectTurns(entries, { leafId, entryMappings: this.meta.entries, cwd: rpc?.cwd ?? this.catalog.get(threadId)?.cwd, senderThreadId: threadId });
     const merged = [];
     for (const turn of turns) {
       const mapped = this.meta.entries[turn.id];
@@ -243,6 +245,8 @@ export class Protocol {
     const record = this.catalog.get(threadId);
     if (!record) throw invalid(`Thread not found: ${threadId}`);
     const rpc = this.loaded.get(threadId);
+    const nickname = record.isSubAgent ? rpc?.state.sessionName ?? record.name ?? null : null;
+    const source = this.threadSource(record, nickname);
     return {
       id: threadId, sessionId: threadId, cwd: record.cwd, path: record.path ?? null,
       name: rpc?.state.sessionName ?? record.name ?? null, preview: record.firstMessage ?? '',
@@ -250,10 +254,24 @@ export class Protocol {
       createdAt: seconds(record.created), updatedAt: seconds(record.modified), recencyAt: seconds(record.modified),
       ephemeral: !record.path, forkedFromId: record.isSubAgent ? null : this.meta.parents?.[threadId] ?? record.parentSessionId ?? null, parentThreadId: record.isSubAgent ? record.parentSessionId ?? null : null,
       status: this.active.has(threadId) ? { type: 'active', activeFlags: [] } : { type: rpc ? 'idle' : 'notLoaded' },
-      turns: includeTurns ? await this.turns(threadId) : [], source: record.isSubAgent ? { subAgent: { other: 'pi-agents' } } : { custom: 'pi' }, threadSource: 'pi',
-      agentNickname: null, agentRole: null, canAcceptDirectInput: !this.meta.trashed?.[threadId] && (this.inputEligibility.get(threadId) ?? Boolean(this.meta.owned?.[threadId])), extra: null, gitInfo: null,
+      turns: includeTurns ? await this.turns(threadId) : [], source, threadSource: 'pi',
+      agentNickname: nickname, agentRole: null, canAcceptDirectInput: !record.isSubAgent && !this.meta.trashed?.[threadId] && (this.inputEligibility.get(threadId) ?? Boolean(this.meta.owned?.[threadId])), extra: null, gitInfo: null,
       historyMode: 'paginated', projectId: null, section: null, sectionEnteredAt: null,
     };
+  }
+
+  threadSource(record, nickname = record.name ?? null) {
+    if (!record.isSubAgent) return { custom: 'pi' };
+    let ancestor = record;
+    let depth = 0;
+    const seen = new Set();
+    while (ancestor?.isSubAgent && !seen.has(ancestor.id)) {
+      seen.add(ancestor.id);
+      depth++;
+      ancestor = this.catalog.get(ancestor.parentSessionId);
+    }
+    if (ancestor && !ancestor.isSubAgent) return { subAgent: { thread_spawn: { parent_thread_id: record.parentSessionId, depth, agent_nickname: nickname } } };
+    return { subAgent: { other: 'pi-agents' } };
   }
 
   historyContext(threadId, scope) {

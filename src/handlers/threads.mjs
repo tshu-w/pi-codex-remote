@@ -37,7 +37,8 @@ export const threadsHandlers = {
     const filtered = records.filter(record => {
       if (params.modelProviders?.length && !params.modelProviders.includes('custom')) return false;
       if (params.sourceKinds?.length) {
-        if (record.isSubAgent ? !params.sourceKinds.some(kind => ['subAgent', 'subAgentOther'].includes(kind)) : !params.sourceKinds.includes('unknown')) return false;
+        const sourceKind = record.isSubAgent ? (this.threadSource(record).subAgent.thread_spawn ? 'subAgentThreadSpawn' : 'subAgentOther') : 'unknown';
+        if (!params.sourceKinds.includes(sourceKind) && !(record.isSubAgent && params.sourceKinds.includes('subAgent'))) return false;
       } else if (record.isSubAgent && (!(params.parentThreadId || params.ancestorThreadId) || params.sourceKinds != null)) return false;
       if (params.projectId != null || params.sectionId != null) return false;
       if (params.parentThreadId && (!record.isSubAgent || record.parentSessionId !== params.parentThreadId)) return false;
@@ -70,7 +71,8 @@ export const threadsHandlers = {
   async 'thread/resume'(params, emit) {
     const effort = executionSettings(params);
     if (params.history != null || params.path) throw invalid('History and path overrides are unsupported; resume by threadId.');
-    let readOnly = !this.meta.owned?.[params.threadId];
+    await this.discover();
+    let readOnly = this.catalog.get(params.threadId)?.isSubAgent || !this.meta.owned?.[params.threadId];
     if (!readOnly && !this.loaded.has(params.threadId)) {
       await this.discover();
       const record = this.catalog.get(params.threadId);
@@ -88,7 +90,7 @@ export const threadsHandlers = {
       if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can resume it.');
       if (header.id !== params.threadId) throw invalid('Session history identity changed. Refresh the list before resuming.');
       this.inputEligibility.set(params.threadId, false);
-      if (!this.meta.trashed?.[params.threadId]) {
+      if (!record.isSubAgent && !this.meta.trashed?.[params.threadId]) {
         try {
           await this.trash.assertSessionNotOpen(record.path);
           this.inputEligibility.set(params.threadId, true);
@@ -158,7 +160,9 @@ export const threadsHandlers = {
   async 'thread/archive'(params) { return this.archive(params.threadId); },
   async 'thread/unarchive'(params) { return this.unarchive(params.threadId); },
   async 'thread/delete'({ threadId }) {
+    await this.discover();
     await this.thread(threadId);
+    if (this.catalog.get(threadId)?.isSubAgent) throw invalid('Sub-agent threads are read-only in Remote.');
     if (!this.meta.trashed?.[threadId]) await this.archive(threadId);
     for (const map of [this.meta.trashed, this.meta.archives, this.meta.owned, this.meta.parents, this.meta.queues]) if (map) delete map[threadId];
     this.catalog.delete(threadId);
@@ -212,7 +216,9 @@ export const threadsHandlers = {
 
 export const threadsMethods = {
   async archive(threadId) {
+    await this.discover();
     await this.thread(threadId);
+    if (this.catalog.get(threadId)?.isSubAgent) throw invalid('Sub-agent threads are read-only in Remote.');
     if (this.meta.trashed?.[threadId]) return {};
     const record = this.catalog.get(threadId);
     if (!record.path) throw invalid('Ephemeral sessions have no history file to move to Trash.');
@@ -465,6 +471,7 @@ export const threadsMethods = {
     await this.discover();
     const record = this.catalog.get(id);
     if (!record) throw invalid('Thread not found.');
+    if (record.isSubAgent) throw invalid('Sub-agent threads are read-only in Remote.');
     workspaceSettings(params, record.cwd);
     const { header, entries } = await this.history.readHistory(record.path);
     if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can resume it.');
