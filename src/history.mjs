@@ -185,14 +185,31 @@ function textContent(content) {
   return (content || []).filter(block => block.type === 'text').map(block => block.text).join('\n');
 }
 
-function userContent(content) {
-  if (typeof content === 'string') return [{ type: 'text', text: content, text_elements: [] }];
-  return (content || []).map(block => block.type === 'image'
-    ? { type: 'image', url: `data:${block.mimeType};base64,${block.data}` }
-    : { type: 'text', text: block.text, text_elements: [] });
+function imageAttachmentText(text) {
+  if (!text?.startsWith('# Files mentioned by the user:\n')) return text;
+  const boundary = text.indexOf('\n## My request:\n');
+  if (boundary === -1) return text;
+  const uuid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+  const attachment = new RegExp(`^## [^\\r\\n]+: /tmp/codex-remote-attachments/${uuid}/${uuid}/[^/\\r\\n]+\\.(?:[jJ][pP][eE]?[gG]|[pP][nN][gG]|[gG][iI][fF]|[wW][eE][bB][pP])$`, 'gm');
+  // Remove duplicate file cards only in the upload header, never in the request body.
+  const original = text.slice(0, boundary);
+  const entry = new RegExp(`${attachment.source}(?:\\n(?:[ \\t]*\\n)*[ \\t]*Image attachment: true(?=\\n|$))?(?:\\n|$)`, 'gm');
+  const header = original.replace(entry, '');
+  if (header !== original && header.trim() === '# Files mentioned by the user:') {
+    return text.slice(boundary + '\n## My request:\n'.length);
+  }
+  return header + text.slice(boundary);
 }
 
-export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = {}, cwd = '', senderThreadId } = {}) {
+function userContent(content, imageMapper) {
+  if (typeof content === 'string') return [{ type: 'text', text: content, text_elements: [] }];
+  const hasImage = content?.some(block => block.type === 'image');
+  return (content || []).map(block => block.type === 'image'
+    ? imageMapper(block)
+    : { type: 'text', text: hasImage ? imageAttachmentText(block.text) : block.text, text_elements: [] });
+}
+
+export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = {}, cwd = '', senderThreadId, imageMapper = block => ({ type: 'image', url: `data:${block.mimeType};base64,${block.data}` }) } = {}) {
   const turns = [];
   let turn;
   const tools = new Map();
@@ -231,7 +248,7 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
       };
     }
     if (role === 'user') {
-      turn.items.push({ type: 'userMessage', id: entry.id, clientId: clientIds[entry.id] ?? message.clientId ?? null, content: userContent(message.content) });
+      turn.items.push({ type: 'userMessage', id: entry.id, clientId: clientIds[entry.id] ?? message.clientId ?? null, content: userContent(message.content, imageMapper) });
     } else if (role === 'assistant') {
       for (const [index, block] of (message.content || []).entries()) {
         const id = `${entry.id}:${index}`;

@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { historyPath, listSessions, readHistory, readSearchText, projectTurns } from './history.mjs';
 import * as sessionTrash from './trash.mjs';
 import { Attachments } from './attachments.mjs';
+import { ImagePreviews } from './image-previews.mjs';
 import { schemaViolation } from './schema.mjs';
 import { seconds, modelKey, invalid } from './codex.mjs';
 import { historyCursor } from './pages.mjs';
@@ -26,7 +27,13 @@ export class Protocol {
   constructor({ sessions, cwd = process.cwd(), stateDir, history = { listSessions, readHistory, readSearchText, projectTurns }, trash = sessionTrash, onResponse = () => {} }) {
     this.sessions = sessions;
     this.trash = trash;
-    this.history = history;
+    this.previews = new ImagePreviews({ stateDir, loadEntries: async threadId => {
+      if (!this.catalog.has(threadId)) await this.discover();
+      return (await this.entries(threadId)).entries;
+    } });
+    this.history = { ...history, projectTurns: (entries, options) => history.projectTurns(entries, {
+      ...options, imageMapper: options?.senderThreadId ? block => this.previews.image(block, options.senderThreadId) : undefined,
+    }) };
     this.cwd = resolve(cwd);
     this.stateDir = stateDir;
     this.attachments = new Attachments({ stateDir });
@@ -191,18 +198,20 @@ export class Protocol {
     this.catalog.set(rpc.id, { ...existing, id: rpc.id, path: rpc.sessionFile, cwd: rpc.cwd, name: rpc.state.sessionName ?? existing?.name, created: existing?.created ?? new Date(), modified: existing?.modified ?? new Date(), firstMessage: existing?.firstMessage ?? '' });
   }
 
+  async entries(threadId) {
+    const rpc = this.loaded.get(threadId);
+    if (rpc && (this.meta.owned?.[threadId] || this.active.has(threadId))) return rpc.request('get_entries');
+    const record = this.catalog.get(threadId);
+    if (!record) throw invalid(`Thread not found: ${threadId}`);
+    const history = await this.history.readHistory(record.path);
+    if (history.header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can display it.');
+    if (history.header.id !== threadId) throw invalid('Session history identity changed. Refresh the list before retrying.');
+    return history;
+  }
+
   async turns(threadId) {
     const rpc = this.loaded.get(threadId);
-    let entries;
-    let leafId;
-    if (rpc && (this.meta.owned?.[threadId] || this.active.has(threadId))) ({ entries, leafId } = await rpc.request('get_entries'));
-    else {
-      const record = this.catalog.get(threadId);
-      if (!record) throw invalid(`Thread not found: ${threadId}`);
-      const history = await this.history.readHistory(record.path);
-      if (history.header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can display it.');
-      ({ entries } = history);
-    }
+    const { entries, leafId } = await this.entries(threadId);
     const running = this.active.get(threadId);
     if (running && this.reconcileEntries(running, entries)) await this.saveMetadata();
     for (const compaction of running?.compactionMappings ?? []) {
@@ -406,6 +415,7 @@ export class Protocol {
   async close() {
     this.queueClosing = true;
     this.attachments.close();
+    this.previews.close();
     for (const processes of this.execProcesses.values()) for (const { kill } of processes.values()) kill();
     await this.sessions.close();
     await this.saving;

@@ -164,7 +164,7 @@ export const turnsMethods = {
       if (active.priorEntries?.has(entry.id) || entry.type !== 'message' || entry.message.role !== 'user') continue;
       const mapping = this.meta.entries[entry.id];
       if (active.completed.has(mapping.itemId)) continue;
-      const item = this.history.projectTurns([entry])[0].items[0];
+      const item = this.history.projectTurns([entry], { senderThreadId: active.rpc.id })[0].items[0];
       item.id = mapping.itemId;
       item.clientId = mapping.clientId;
       this.completeItem(active, this.startItem(active, item));
@@ -298,7 +298,7 @@ export const turnsMethods = {
       const user = active.users[index] ??= { clientId: null };
       user.itemId ??= randomUUID();
       if (active.completed.has(user.itemId)) return;
-      const item = this.history.projectTurns([{ type: 'message', id: user.itemId, timestamp: new Date().toISOString(), message: event.message }])[0].items[0];
+      const item = this.history.projectTurns([{ type: 'message', id: user.itemId, timestamp: new Date().toISOString(), message: event.message }], { senderThreadId: rpc.id })[0].items[0];
       item.clientId = user.clientId;
       this.completeItem(active, this.startItem(active, item));
     } else if (event.type === 'message_start' && event.message.role === 'assistant') {
