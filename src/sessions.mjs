@@ -25,18 +25,21 @@ export class RpcSession {
     this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.onState = onState;
     this.stderr = '';
-    let buffer = '';
+    let fragments = [];
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', chunk => {
-      buffer += chunk;
+      let start = 0;
       let index;
-      while ((index = buffer.indexOf('\n')) !== -1) {
-        const line = buffer.slice(0, index).replace(/\r$/, '');
-        buffer = buffer.slice(index + 1);
+      while ((index = chunk.indexOf('\n', start)) !== -1) {
+        fragments.push(chunk.slice(start, index));
+        const line = fragments.join('').replace(/\r$/, '');
+        fragments = [];
+        start = index + 1;
         if (!line) continue;
         try { this.receive(JSON.parse(line)); }
         catch (error) { this.fail(new Error(`Invalid Pi RPC output: ${error.message}`)); child.kill('SIGTERM'); }
       }
+      if (start < chunk.length) fragments.push(chunk.slice(start));
     });
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', chunk => { this.stderr = (this.stderr + chunk).slice(-4000); });

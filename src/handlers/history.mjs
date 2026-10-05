@@ -32,8 +32,8 @@ function matches(text, needle) {
 
 function snippet(text, start, end) {
   // Keep Unicode scalar boundaries while reporting offsets in UTF-16 code units.
-  const before = [...text.slice(0, start)].slice(-49).join('');
-  const after = [...text.slice(end)].slice(0, 96).join('');
+  const before = [...text.slice(Math.max(0, start - 49 * 2), start)].slice(-49).join('');
+  const after = [...text.slice(end, end + 96 * 2)].slice(0, 96).join('');
   const prefix = before.length < start ? '... ' : '';
   const suffix = end + after.length < text.length ? ' ...' : '';
   const matchStart = prefix.length + before.length;

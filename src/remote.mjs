@@ -36,6 +36,7 @@ export class Remote {
   constructor({ stateDir = remotePaths().state, authPath = remotePaths().auth, handle, fetchImpl = fetch, socketFactory = (url, options) => new WebSocket(url, options), onStatus = () => {}, disconnect = () => {}, onTrace }) {
     Object.assign(this, { stateDir, authPath, handle, fetchImpl, socketFactory, onStatus, disconnect, onTrace });
     this.pending = new Map();
+    this.frameSizes = new WeakMap();
     this.incoming = new Map();
     this.received = new Map();
     this.runtimeReceived = new Map();
@@ -204,6 +205,16 @@ export class Remote {
     } else this.trace('send-deferred', frame);
   }
 
+  frameSize(frame) {
+    // Pending frames are snapshots; ACK filtering preserves surviving frame identities.
+    let size = this.frameSizes.get(frame);
+    if (size === undefined) {
+      size = Buffer.byteLength(JSON.stringify(frame));
+      this.frameSizes.set(frame, size);
+    }
+    return size;
+  }
+
   emit(clientId, streamId, message) {
     return this.emitEvent(clientId, streamId, { type: 'server_message', message });
   }
@@ -218,8 +229,8 @@ export class Remote {
     const frames = [];
     if (bytes.length <= CHUNK_SIZE) frames.push({ ...base, ...event });
     else for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) frames.push({ ...base, type: 'server_message_chunk', segment_id: frames.length, segment_count: Math.ceil(bytes.length / CHUNK_SIZE), message_size_bytes: bytes.length, message_chunk_base64: bytes.subarray(offset, offset + CHUNK_SIZE).toString('base64') });
-    const size = [...this.pending.values()].flat().reduce((total, frame) => total + Buffer.byteLength(JSON.stringify(frame)), 0);
-    if (size + frames.reduce((total, frame) => total + Buffer.byteLength(JSON.stringify(frame)), 0) > MAX_MESSAGE) throw new Error('Remote acknowledgement backlog exceeds 100 MiB; reconnect the phone');
+    const size = [...this.pending.values()].flat().reduce((total, frame) => total + this.frameSize(frame), 0);
+    if (size + frames.reduce((total, frame) => total + this.frameSize(frame), 0) > MAX_MESSAGE) throw new Error('Remote acknowledgement backlog exceeds 100 MiB; reconnect the phone');
     this.sequences.set(key, seq);
     this.pending.set(`${key}\0${seq}`, frames);
     this.state.sequences = Object.fromEntries(this.sequences);
