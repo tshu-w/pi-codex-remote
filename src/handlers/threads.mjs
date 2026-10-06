@@ -303,7 +303,7 @@ export const threadsMethods = {
     if (typeof beforeTurnId !== 'string' || !beforeTurnId) throw invalid('beforeTurnId must be a non-empty string.');
     const thread = await this.rewind(threadId, beforeTurnId, emit);
     const lastTurn = thread.turns.at(-1);
-    const lastItem = thread.turns.flatMap(turn => turn.items).at(-1);
+    const lastItem = thread.turns.findLast(turn => turn.items.length)?.items.at(-1);
     return {
       thread: { ...thread, turns: [] },
       itemsBackwardsCursor: lastItem ? historyCursor(lastItem.id, true, this.historyContext(threadId, 'items')) : null,

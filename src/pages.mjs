@@ -37,9 +37,16 @@ export function historyPage(values, params, getId, context, filter = () => true)
     if (index < 0) throw invalid('History pagination cursor is no longer valid.');
     start = index + (inclusive ? 0 : 1);
   }
-  const remaining = values.slice(start).filter(filter);
-  const data = remaining.slice(0, pageLimit(params.limit));
-  return { data, nextCursor: data.length < remaining.length ? historyCursor(getId(data.at(-1)), false, context) : null, backwardsCursor: data.length ? historyCursor(getId(data[0]), true, context) : null };
+  const limit = pageLimit(params.limit);
+  const data = [];
+  let hasMore = false;
+  for (let index = start; index < values.length; index++) {
+    const value = values[index];
+    if (!filter(value)) continue;
+    if (data.length === limit) { hasMore = true; break; }
+    data.push(value);
+  }
+  return { data, nextCursor: hasMore ? historyCursor(getId(data.at(-1)), false, context) : null, backwardsCursor: data.length ? historyCursor(getId(data[0]), true, context) : null };
 }
 export function turnView(turn, itemsView = 'summary') {
   if (!['notLoaded', 'summary', 'full'].includes(itemsView)) throw invalid('Invalid itemsView.');

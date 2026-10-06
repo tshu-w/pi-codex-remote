@@ -67,7 +67,19 @@ export const configHandlers = {
     const current = modelKey(rpc.state.model);
     const page = offsetPage(models, params, 100);
     return {
-      data: page.data.map(model => ({ id: modelKey(model), model: modelKey(model), displayName: model.name ?? model.id, description: model.provider, hidden: false, isDefault: modelKey(model) === current, inputModalities: model.input ?? ['text'], supportedReasoningEfforts: supportedEfforts(model).map(reasoningEffort => ({ reasoningEffort, description: reasoningEffort })), defaultReasoningEffort: modelKey(model) === current ? rpc.state.thinkingLevel ?? 'off' : supportedEfforts(model).includes('medium') ? 'medium' : supportedEfforts(model)[0], additionalSpeedTiers: [], availabilityNux: null, defaultServiceTier: null, modelSpecialty: null, multiAgentVersion: null, serviceTiers: [], supportsPersonality: false, upgrade: null, upgradeInfo: null })),
+      data: page.data.map(model => {
+        const key = modelKey(model);
+        const efforts = supportedEfforts(model);
+        const isDefault = key === current;
+        return {
+          id: key, model: key, displayName: model.name ?? model.id, description: model.provider,
+          hidden: false, isDefault, inputModalities: model.input ?? ['text'],
+          supportedReasoningEfforts: efforts.map(reasoningEffort => ({ reasoningEffort, description: reasoningEffort })),
+          defaultReasoningEffort: isDefault ? rpc.state.thinkingLevel ?? 'off' : efforts.includes('medium') ? 'medium' : efforts[0],
+          additionalSpeedTiers: [], availabilityNux: null, defaultServiceTier: null, modelSpecialty: null,
+          multiAgentVersion: null, serviceTiers: [], supportsPersonality: false, upgrade: null, upgradeInfo: null,
+        };
+      }),
       nextCursor: page.nextCursor,
     };
   },

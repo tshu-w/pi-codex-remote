@@ -242,7 +242,7 @@ export class Protocol {
     if (active) {
       const current = merged.find(turn => turn.id === active.turn.id);
       const items = new Map([...(current?.items ?? []), ...active.turn.items].map(item => [item.id, item]));
-      const live = { ...structuredClone(active.turn), items: structuredClone([...items.values()]), status: 'inProgress', error: null, completedAt: null, durationMs: null };
+      const live = structuredClone({ ...active.turn, items: [...items.values()], status: 'inProgress', error: null, completedAt: null, durationMs: null });
       if (current) Object.assign(current, live);
       else merged.push(live);
     }
@@ -293,7 +293,7 @@ export class Protocol {
     const turns = await this.turns(threadId);
     if (includeTurns) thread.turns = turns;
     const lastTurn = turns.at(-1);
-    const lastItem = turns.flatMap(turn => turn.items).at(-1);
+    const lastItem = turns.findLast(turn => turn.items.length)?.items.at(-1);
     return {
       thread, cwd: rpc.cwd, model: modelKey(rpc.state.model),
       modelProvider: 'custom', reasoningEffort: rpc.state.thinkingLevel,

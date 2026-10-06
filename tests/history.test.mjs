@@ -1,6 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { model, setup } from './harness.mjs';
+import { historyCursor, historyPage } from '../src/pages.mjs';
+
+test('filtered history pages preserve anchors and stop after finding the next page', () => {
+  const values = Array.from({ length: 100 }, (_, id) => ({ id: String(id), visible: id % 3 === 0 }));
+  const context = { threadId: 'thread', scope: 'items' };
+  const getId = value => value.id;
+  let visited = 0;
+  const filter = value => { visited++; return value.visible; };
+  const first = historyPage(values, { limit: 2 }, getId, context, filter);
+  assert.deepEqual(first, {
+    data: [values[0], values[3]], nextCursor: historyCursor('3', false, context),
+    backwardsCursor: historyCursor('0', true, context),
+  });
+  assert.equal(visited, 7);
+  const next = historyPage(values, { limit: 2, cursor: first.nextCursor }, getId, context, filter);
+  assert.deepEqual(next.data, [values[6], values[9]]);
+  assert.deepEqual(historyPage(values, { limit: 2, cursor: next.backwardsCursor }, getId, context, filter), next);
+  const tail = historyPage(values, { limit: 2, cursor: historyCursor('95', true, context) }, getId, context, filter);
+  assert.deepEqual(tail.data, [values[96], values[99]]);
+  assert.equal(tail.nextCursor, null);
+  assert.deepEqual(historyPage(values, { cursor: historyCursor('99', false, context) }, getId, context, filter), {
+    data: [], nextCursor: null, backwardsCursor: null,
+  });
+});
 
 test('real Pi search occurrences and timeline preserve Unicode ranges, pagination and restart anchors', async t => {
   const env = await setup(t);
