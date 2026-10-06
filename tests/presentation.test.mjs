@@ -5,6 +5,13 @@ import test from 'node:test';
 import { model, setup } from './harness.mjs';
 import { textPhase } from '../src/codex.mjs';
 
+async function runAndCollect(phone, threadId, prompt) {
+  const turn = await phone.turn(threadId, prompt);
+  assert.equal(turn.status, 'completed');
+  turn.items = phone.records.filter(record => record.method === 'item/completed' && record.params.turnId === turn.id).map(record => record.params.item);
+  return turn;
+}
+
 test('phone tool cards and message phases retain their contents after reopening history', { timeout: 120000 }, async t => {
   const f = await setup(t);
   await writeFile(join(f.cwd, 'input.txt'), 'fixture-data\n');
@@ -13,9 +20,7 @@ test('phone tool cards and message phases retain their contents after reopening 
   const { thread } = await phone.request('thread/start', { cwd: f.cwd, model });
   const completed = [];
   for (const prompt of ['read input.txt', 'grep fixture-data', 'find *.txt', 'ls .', 'write output.txt', 'edit output.txt', 'write output.txt replaced', 'mcp__fixture__lookup', 'nested', 'read missing.txt']) {
-    const turn = await phone.turn(thread.id, prompt);
-    assert.equal(turn.status, 'completed');
-    turn.items = phone.records.filter(record => record.method === 'item/completed' && record.params.turnId === turn.id).map(record => record.params.item);
+    const turn = await runAndCollect(phone, thread.id, prompt);
     const texts = turn.items.filter(item => item.type === 'agentMessage');
     assert.deepEqual(texts.map(item => item.phase), ['commentary', 'final_answer'], prompt);
     completed.push(turn);
@@ -48,9 +53,7 @@ test('phone tool cards and message phases retain their contents after reopening 
   assert.ok(failed.aggregatedOutput.includes('missing.txt'));
   // The provider simulates pi-agents at the tool boundary; projection and child history are production paths.
   const agentTurn = async args => {
-    const turn = await phone.turn(thread.id, `agent ${JSON.stringify(args)}`);
-    assert.equal(turn.status, 'completed');
-    turn.items = phone.records.filter(record => record.method === 'item/completed' && record.params.turnId === turn.id).map(record => record.params.item);
+    const turn = await runAndCollect(phone, thread.id, `agent ${JSON.stringify(args)}`);
     completed.push(turn);
     return turn.items;
   };

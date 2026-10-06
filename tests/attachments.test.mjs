@@ -4,32 +4,11 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { projectTurns } from '../src/history.mjs';
 import { ImagePreviews } from '../src/image-previews.mjs';
-import { deflateSync } from 'node:zlib';
 import test from 'node:test';
 import { model, setup } from './harness.mjs';
 
-function chunk(type, data) {
-  const body = Buffer.concat([Buffer.from(type), data]);
-  let crc = 0xffffffff;
-  for (const byte of body) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
-  }
-  const size = Buffer.alloc(4);
-  size.writeUInt32BE(data.length);
-  const checksum = Buffer.alloc(4);
-  checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
-  return Buffer.concat([size, body, checksum]);
-}
-
 // A valid 2x2 RGBA PNG.
-const header = Buffer.alloc(13);
-header.writeUInt32BE(2, 0);
-header.writeUInt32BE(2, 4);
-header[8] = 8;
-header[9] = 6;
-const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', header),
-  chunk('IDAT', deflateSync(Buffer.from([0, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255, 255]))), chunk('IEND', Buffer.alloc(0))]);
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP4z8DwHwyBNBgAAEnICff5q7YNAAAAAElFTkSuQmCC', 'base64');
 
 function imageFileEntries(text) {
   const boundary = text.indexOf('\n## My request:\n');
