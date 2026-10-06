@@ -229,7 +229,8 @@ export class Remote {
     const frames = [];
     if (bytes.length <= CHUNK_SIZE) frames.push({ ...base, ...event });
     else for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) frames.push({ ...base, type: 'server_message_chunk', segment_id: frames.length, segment_count: Math.ceil(bytes.length / CHUNK_SIZE), message_size_bytes: bytes.length, message_chunk_base64: bytes.subarray(offset, offset + CHUNK_SIZE).toString('base64') });
-    const size = [...this.pending.values()].flat().reduce((total, frame) => total + this.frameSize(frame), 0);
+    let size = 0;
+    for (const pendingFrames of this.pending.values()) for (const frame of pendingFrames) size += this.frameSize(frame);
     if (size + frames.reduce((total, frame) => total + this.frameSize(frame), 0) > MAX_MESSAGE) throw new Error('Remote acknowledgement backlog exceeds 100 MiB; reconnect the phone');
     this.sequences.set(key, seq);
     this.pending.set(`${key}\0${seq}`, frames);
@@ -284,16 +285,21 @@ export class Remote {
       if (!Number.isInteger(envelope.segment_count) || envelope.segment_count < 1 || envelope.segment_count > 1024 || !Number.isInteger(envelope.segment_id) || envelope.segment_id < 0 || envelope.segment_id >= envelope.segment_count || !Number.isSafeInteger(envelope.message_size_bytes) || envelope.message_size_bytes < 1 || envelope.message_size_bytes > MAX_MESSAGE || typeof envelope.message_chunk_base64 !== 'string') throw new Error('Invalid Remote chunk');
       const id = `${key}\0${seq}`;
       if (!this.chunks.has(id) && this.chunks.size >= 16) throw new Error('Too many incomplete Remote messages');
-      const assembly = this.chunks.get(id) || { parts: Array(envelope.segment_count).fill(undefined), size: envelope.message_size_bytes };
+      const assembly = this.chunks.get(id) || { parts: Array(envelope.segment_count).fill(undefined), size: envelope.message_size_bytes, bytes: 0, receivedCount: 0 };
       if (assembly.parts.length !== envelope.segment_count || assembly.size !== envelope.message_size_bytes) throw new Error('Remote chunk metadata changed');
       const part = Buffer.from(envelope.message_chunk_base64, 'base64');
-      const used = [...this.chunks.values()].reduce((total, item) => total + item.parts.reduce((sum, value) => sum + (value?.length || 0), 0), 0);
+      let used = 0;
+      for (const item of this.chunks.values()) used += item.bytes;
       if (used + part.length - (assembly.parts[envelope.segment_id]?.length || 0) > MAX_MESSAGE) throw new Error('Remote chunk backlog exceeds 100 MiB');
       const previous = assembly.parts[envelope.segment_id];
       if (previous && !previous.equals(part)) throw new Error('Remote chunk content changed');
+      if (previous === undefined) {
+        assembly.bytes += part.length;
+        assembly.receivedCount++;
+      }
       assembly.parts[envelope.segment_id] = part;
       this.chunks.set(id, assembly);
-      if (assembly.parts.some(part => part === undefined)) return;
+      if (assembly.receivedCount !== assembly.parts.length) return;
       this.chunks.delete(id);
       const bytes = Buffer.concat(assembly.parts);
       if (bytes.length !== assembly.size) throw new Error('Remote chunk size mismatch');

@@ -11,6 +11,68 @@ function remote(t, options = {}) {
   return instance;
 }
 
+function chunk(stream, segment, part, count, size) {
+  return {
+    type: 'client_message_chunk', client_id: 'client', stream_id: stream, seq_id: 1,
+    segment_id: segment, segment_count: count, message_size_bytes: size,
+    message_chunk_base64: Buffer.from(part).toString('base64'),
+  };
+}
+
+test('incoming chunks assemble out of order with duplicate and empty parts', async t => {
+  const handled = [];
+  const instance = remote(t, { handle(message) { handled.push(message); } });
+  const message = Buffer.from(JSON.stringify({ id: 1, method: 'test', text: '中🙂' }));
+  const parts = [message.subarray(0, 1), Buffer.alloc(0), message.subarray(1)];
+  const send = (segment, part = parts[segment]) => instance.receive(chunk('stream', segment, part, parts.length, message.length));
+  await send(2);
+  await send(2);
+  await send(1);
+  await send(1);
+  assert.equal(handled.length, 0);
+  const assembly = instance.chunks.get('client\0stream\0' + 1);
+  assert.equal(assembly.bytes, parts[2].length);
+  assert.equal(assembly.receivedCount, 2);
+  await assert.rejects(send(2, 'conflict'), /chunk content changed/);
+  await assert.rejects(send(1, 'x'), /chunk content changed/);
+  assert.equal(assembly.bytes, parts[2].length);
+  assert.equal(assembly.receivedCount, 2);
+  await send(0);
+  assert.deepEqual(handled, [JSON.parse(message)]);
+  assert.equal(instance.chunks.size, 0);
+});
+
+test('incoming byte budget spans assemblies and releases on closure and completion', async t => {
+  const handled = [];
+  const instance = remote(t, { handle(message) { handled.push(message); } });
+  const cap = 100 * 1024 * 1024;
+  const block = Buffer.alloc(cap / 10, ' ').toString('base64');
+  const frame = (stream, segment) => ({ ...chunk(stream, segment, '', 7, cap / 2 + 2), message_chunk_base64: block });
+  for (const stream of ['first', 'second']) {
+    for (let segment = 1; segment <= 5; segment++) await instance.receive(frame(stream, segment));
+  }
+  await instance.receive(frame('first', 1));
+  await assert.rejects(instance.receive(chunk('first', 0, '{', 7, cap / 2 + 2)), /chunk backlog/);
+  // Budget rejection must precede content conflict when a replacement grows past the cap.
+  await assert.rejects(instance.receive(chunk('first', 1, Buffer.alloc(cap / 10 + 1, 'x'), 7, cap / 2 + 2)), /chunk backlog/);
+  await assert.rejects(instance.receive(chunk('first', 1, Buffer.alloc(cap / 10, 'x'), 7, cap / 2 + 2)), /chunk content changed/);
+  await instance.receive({ type: 'client_closed', client_id: 'client', stream_id: 'second' });
+  assert.equal(instance.chunks.size, 1);
+  await instance.receive(chunk('first', 0, '{', 7, cap / 2 + 2));
+  await instance.receive(chunk('first', 6, '}', 7, cap / 2 + 2));
+  assert.deepEqual(handled, [{}]);
+  assert.equal(instance.chunks.size, 0);
+  for (let segment = 0; segment < 10; segment++) {
+    await instance.receive({ ...frame('third', segment), segment_count: 11, message_size_bytes: cap });
+  }
+  await assert.rejects(instance.receive(chunk('third', 10, 'x', 11, cap)), /chunk backlog/);
+  await instance.receive({ type: 'client_closed', client_id: 'client' });
+  assert.equal(instance.chunks.size, 0);
+  await instance.receive(chunk('new', 0, '{', 2, 2));
+  await instance.receive(chunk('new', 1, '}', 2, 2));
+  assert.deepEqual(handled, [{}, {}]);
+});
+
 const backlogBytes = instance => [...instance.pending.values()].flat()
   .reduce((total, frame) => total + Buffer.byteLength(JSON.stringify(frame)), 0);
 
