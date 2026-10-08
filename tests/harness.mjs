@@ -17,6 +17,7 @@ const remoteExtension = fileURLToPath(new URL('../index.ts', import.meta.url));
 //   "read <file>" / "write <file>" / "bash <command>" call that Pi tool, then answer "done:<tool>"
 //   "hold" streams "held" and waits for `/fixture-release` before finishing with "held:released"
 //   anything else answers "echo:" plus every user text in context, joined by "|"
+// A `fixture-busy` file in the workspace makes Pi report background work.
 const providerFixture = new URL('./fixtures/provider.ts', import.meta.url);
 export async function waitFor(predicate, description, timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
@@ -82,7 +83,7 @@ export async function setup(t) {
     await rename(path, target);
     return target;
   } };
-  const start = () => {
+  const start = ({ releaseDelayMs } = {}) => {
     const sessions = new Sessions({
       command: '/usr/bin/env',
       args: ['-i', `PATH=${process.env.PATH}`, `HOME=${dirs.home}`, `XDG_STATE_HOME=${dirs.state}`,
@@ -92,7 +93,7 @@ export async function setup(t) {
         '--no-themes', '--no-context-files', '--session-dir', dirs.sessions],
       requestTimeoutMs: 30000, shutdownTimeoutMs: 1000,
     });
-    const protocol = new Protocol({ sessions, cwd: dirs.cwd, stateDir: join(root, 'remote-state'), trash: fixtureTrash });
+    const protocol = new Protocol({ sessions, cwd: dirs.cwd, stateDir: join(root, 'remote-state'), trash: fixtureTrash, releaseDelayMs });
     protocols.push(protocol);
     return { protocol, sessions, client: phone(protocol) };
   };

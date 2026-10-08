@@ -7,6 +7,7 @@ import { ImagePreviews } from './image-previews.mjs';
 import { schemaViolation } from './schema.mjs';
 import { seconds, modelKey, invalid } from './codex.mjs';
 import { historyCursor } from './pages.mjs';
+import { releaseCommand } from './release-command.mjs';
 import { configHandlers } from './handlers/config.mjs';
 import { execHandlers } from './handlers/exec.mjs';
 import { filesHandlers } from './handlers/files.mjs';
@@ -24,7 +25,7 @@ function checkSchema(message, requestMethod) {
 const handlers = { ...configHandlers, ...execHandlers, ...filesHandlers, ...turnsHandlers, ...threadsHandlers, ...historyHandlers, ...queueHandlers };
 
 export class Protocol {
-  constructor({ sessions, cwd = process.cwd(), stateDir, history = { listSessions, readHistory, readSearchText, projectTurns }, trash = sessionTrash, onResponse = () => {} }) {
+  constructor({ sessions, cwd = process.cwd(), stateDir, history = { listSessions, readHistory, readSearchText, projectTurns }, trash = sessionTrash, onResponse = () => {}, releaseDelayMs = 300_000 }) {
     this.sessions = sessions;
     this.trash = trash;
     this.previews = new ImagePreviews({ stateDir, loadEntries: async threadId => {
@@ -54,6 +55,13 @@ export class Protocol {
     this.meta = { archives: {}, entries: {}, parents: {} };
     this.ready = this.loadMetadata();
     this.saving = Promise.resolve();
+    this.releaseDelayMs = releaseDelayMs;
+    this.lastUsed = new Map();
+    this.inUse = new Map();
+    this.probeUsed = new Map();
+    this.releases = new Map();
+    this.releaseTimer = setInterval(() => void this.releaseIdle(), Math.min(releaseDelayMs, 60_000));
+    this.releaseTimer.unref();
   }
 
   async loadMetadata() {
@@ -90,6 +98,7 @@ export class Protocol {
   unsubscribe(threadId, emit) {
     const listeners = this.subscribers.get(threadId);
     listeners?.delete(emit);
+    if (listeners && !listeners.size) this.lastUsed.set(threadId, Date.now());
     if (!listeners?.size) this.subscribers.delete(threadId);
     for (const packet of this.notificationBarriers.get(threadId)?.pending ?? []) {
       if (packet.emit === emit) { packet.emit = null; packet.message = null; }
@@ -191,8 +200,12 @@ export class Protocol {
   }
 
   register(rpc) {
-    if (!this.loaded.has(rpc.id)) rpc.onEvent(event => this.event(rpc, event));
+    if (!this.loaded.has(rpc.id)) rpc.onEvent(event => {
+      if (['agent_settled', 'compaction_end'].includes(event.type)) this.lastUsed.set(rpc.id, Date.now());
+      this.event(rpc, event);
+    });
     this.loaded.set(rpc.id, rpc);
+    this.lastUsed.set(rpc.id, Date.now());
     this.inputEligibility.delete(rpc.id);
     const existing = this.catalog.get(rpc.id);
     this.catalog.set(rpc.id, { ...existing, id: rpc.id, path: rpc.sessionFile, cwd: rpc.cwd, name: rpc.state.sessionName ?? existing?.name, created: existing?.created ?? new Date(), modified: existing?.modified ?? new Date(), firstMessage: existing?.firstMessage ?? '' });
@@ -325,9 +338,13 @@ export class Protocol {
     if (message.id == null) return;
     let releaseMutation;
     let barrier;
+    const threadId = message.params?.threadId;
     try {
       await this.ready;
-      const threadId = message.params?.threadId;
+      if (threadId) {
+        await this.releases.get(threadId);
+        this.inUse.set(threadId, (this.inUse.get(threadId) ?? 0) + 1);
+      }
       const mutates = threadId && ['thread/resume', 'thread/settings/update', 'thread/fork', 'thread/revert', 'thread/name/set', 'thread/compact/start', 'thread/shellCommand', 'thread/delete', 'thread/archive', 'thread/unarchive', 'turn/start', 'turn/interrupt', 'thread/queue/add', 'thread/queue/list', 'thread/queue/update', 'thread/queue/delete', 'thread/queue/reorder', 'thread/queue/start'].includes(message.method);
       if (mutates) releaseMutation = await this.acquireThreadMutation(threadId);
       if (['turn/start', 'thread/shellCommand', 'thread/queue/start'].includes(message.method) && threadId) {
@@ -380,7 +397,67 @@ export class Protocol {
       } finally {
         if (barrier) this.notificationBarriers.delete(barrier.threadId);
         releaseMutation?.();
+        if (this.inUse.has(threadId)) {
+          const count = this.inUse.get(threadId) - 1;
+          if (count) this.inUse.set(threadId, count);
+          else this.inUse.delete(threadId);
+          this.lastUsed.set(threadId, Date.now());
+        }
       }
+    }
+  }
+
+  // Like Codex app-server, an unsubscribed thread with no turn is unloaded after a delay.
+  releasable(threadId, rpc) {
+    return this.loaded.get(threadId) === rpc && !rpc.failure && !rpc.closing
+      && !this.subscribers.has(threadId) && !this.active.has(threadId) && !this.inUse.has(threadId) && !this.opening.has(threadId)
+      && !rpc.state.isStreaming && !rpc.state.isCompacting && !rpc.state.pendingMessageCount
+      && Date.now() - (this.lastUsed.get(threadId) ?? 0) >= this.releaseDelayMs;
+  }
+
+  async releaseIdle() {
+    if (this.releasing || this.queueClosing) return;
+    this.releasing = true;
+    try {
+      for (const [threadId, rpc] of [...this.loaded]) if (!this.mutating.has(threadId) && !this.mutationQueues.has(threadId) && this.releasable(threadId, rpc)) await this.releaseThread(threadId, rpc);
+      for (const [cwd, opening] of [...this.probes]) {
+        if (Date.now() - (this.probeUsed.get(cwd) ?? 0) < this.releaseDelayMs) continue;
+        const rpc = await opening.catch(() => undefined);
+        if (this.probes.get(cwd) !== opening || Date.now() - (this.probeUsed.get(cwd) ?? 0) < this.releaseDelayMs || rpc?.pending.size) continue;
+        this.probes.delete(cwd);
+        await rpc?.close();
+      }
+    } finally { this.releasing = false; }
+  }
+
+  // Pi decides whether it has work, including other extensions' background work; a busy Pi is kept and retried later.
+  async releaseThread(threadId, rpc) {
+    let done;
+    this.releases.set(threadId, new Promise(resolve => { done = resolve; }));
+    let releaseMutation;
+    try {
+      releaseMutation = await this.acquireThreadMutation(threadId);
+      if (!this.releasable(threadId, rpc)) return;
+      await rpc.refresh();
+      if (!this.releasable(threadId, rpc)) return;
+      let busy;
+      const unsubscribe = rpc.onEvent(event => {
+        if (event.type === 'extension_error' && event.extensionPath === `command:${releaseCommand}`) busy = event.error;
+      });
+      let result;
+      try { result = await rpc.request('prompt', { message: `/${releaseCommand}` }); }
+      finally { unsubscribe(); }
+      if (busy || result?.disposition !== 'handled') { this.lastUsed.set(threadId, Date.now()); return; }
+      await rpc.close();
+      this.loaded.delete(threadId);
+      this.lastUsed.delete(threadId);
+      this.notify(null, 'thread/closed', { threadId });
+    } catch {
+      this.lastUsed.set(threadId, Date.now());
+    } finally {
+      releaseMutation?.();
+      this.releases.delete(threadId);
+      done();
     }
   }
 
@@ -391,6 +468,7 @@ export class Protocol {
       opening = this.sessions.open({ cwd, ephemeral: true });
       this.probes.set(cwd, opening);
     }
+    this.probeUsed.set(cwd, Date.now());
     try {
       const rpc = await opening;
       if (rpc.failure) {
@@ -414,6 +492,7 @@ export class Protocol {
 
   async close() {
     this.queueClosing = true;
+    clearInterval(this.releaseTimer);
     this.attachments.close();
     this.previews.close();
     for (const processes of this.execProcesses.values()) for (const { kill } of processes.values()) kill();

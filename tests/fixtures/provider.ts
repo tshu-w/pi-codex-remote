@@ -1,5 +1,5 @@
 
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
@@ -9,6 +9,7 @@ const text = content => typeof content === 'string' ? content : content.filter(b
 export default function (pi) {
   let release;
   pi.registerCommand('fixture-release', { description: 'Release a held reply', handler: async () => release?.() });
+  pi.events.on('work:query', query => { if (existsSync(join(process.cwd(), 'fixture-busy'))) query.busy = true; });
   pi.on('tool_call', async (event, ctx) => {
     if (event.toolName === 'write' && event.input.path === 'blocked.txt' && !(await ctx.ui.confirm('Fixture permission', 'Allow write?'))) return { block: true, reason: 'Fixture write denied' };
   });

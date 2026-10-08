@@ -3,11 +3,13 @@ import { Loader, Text } from "@earendil-works/pi-tui";
 import QRCode from "qrcode";
 import { control, start } from "./src/daemon.mjs";
 import { createLiveSessionRegistry } from "./src/live-sessions.mjs";
+import { registerReleaseCommand } from "./src/release-command.mjs";
 import { registerRevertCommand } from "./src/revert-command.mjs";
 import { registerToolPresentation } from "./src/tool-presentation.mjs";
 
 export default function codexRemote(pi: ExtensionAPI) {
   registerRevertCommand(pi);
+  registerReleaseCommand(pi);
   registerToolPresentation(pi, generateUnifiedPatch);
   const liveSessions = createLiveSessionRegistry();
   pi.on("session_start", (_event, ctx) => {
