@@ -8,7 +8,7 @@ export function registerReleaseCommand(pi) {
       if (ctx.mode !== 'rpc') throw new Error('Remote release requires RPC mode.');
       // Extensions with background work, such as pi-agents, set `busy` synchronously.
       const query = { busy: false };
-      pi.events.emit('work:query', query);
+      pi.events.emit('busy:query', query);
       if (!ctx.isIdle() || ctx.hasPendingMessages() || query.busy) throw new Error('Pi still has work.');
       ctx.shutdown();
     },
