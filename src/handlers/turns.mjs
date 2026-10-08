@@ -355,7 +355,7 @@ export const turnsMethods = {
       const previousOutput = item.aggregatedOutput ?? '';
       updateToolItem(item, complete ? event.result : event.partialResult, {
         complete, isError: event.isError, cwd: rpc.cwd, senderThreadId: rpc.id, ...active.toolInputs?.get(item.id),
-        durationMs: Date.now() - (active.toolStartedAt?.get(item.id) ?? Date.now()),
+        durationMs: event.durationMs ?? Date.now() - (active.toolStartedAt?.get(item.id) ?? Date.now()),
       });
       if (complete && !active.turn.items.some(existing => existing.id === item.id)) this.startItem(active, item);
       if (item.type === 'commandExecution' && active.turn.items.some(existing => existing.id === item.id)) {

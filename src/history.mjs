@@ -274,7 +274,7 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
         tools.set(message.toolCallId, item);
         turn.items.push(item);
       }
-      updateToolItem(item, message, { complete: true, isError: message.isError, cwd, senderThreadId, ...inputs.get(message.toolCallId) });
+      updateToolItem(item, message, { complete: true, isError: message.isError, durationMs: message.durationMs, cwd, senderThreadId, ...inputs.get(message.toolCallId) });
       for (const call of message.nestedCalls?.calls ?? []) {
         if (tools.has(call.id)) continue;
         const saved = nestedItems.get(call.id);
