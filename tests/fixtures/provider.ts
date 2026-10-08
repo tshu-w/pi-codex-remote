@@ -48,7 +48,7 @@ export default function (pi) {
         details = args.action === 'abort' ? { id: ids[0], aborted: true }
           : args.action === 'send' ? (args.deliverAs === 'write' ? { ids } : { id: ids[0], queued: false })
           : args.action === 'wait' ? { results: ['First result', 'Second result'].map(result => ({ id: children.get('researcher'), name: 'researcher', state: 'completed', history: false, result })), pending: [] }
-          : { total: children.size, agents: [...children].map(([name, id]) => ({ id, name, ownerId: ctx.sessionManager.getSessionId(), state: 'idle' })) };
+          : { total: children.size, agents: [...children].map(([name, id]) => ({ id, name, ownerId: ctx.sessionManager.getSessionId(), state: name === 'researcher' ? 'waiting' : 'idle' })) };
       }
       const label = id => [...children].find(([, value]) => value === id)?.[0] + ' (' + id.slice(0, 8) + ')';
       const output = args.action === 'spawn' ? 'Agent ' + label(details.id) + ' started.'

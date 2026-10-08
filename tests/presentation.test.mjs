@@ -98,6 +98,7 @@ test('phone tool cards and message phases retain their contents after reopening 
     assert.equal(card.tool, tool);
     assert.deepEqual(card.receiverThreadIds, receivers);
   }
+  const listed = { [children[0]]: { status: 'running', message: null } };
   for (const action of ['wait', 'list']) {
     const items = await agentTurn({ action });
     const card = items.find(item => item.type === 'collabAgentToolCall');
@@ -106,13 +107,13 @@ test('phone tool cards and message phases retain their contents after reopening 
     assert.equal(card.senderThreadId, thread.id);
     assert.deepEqual(card.receiverThreadIds, action === 'wait' ? [children[0]] : children);
     // Result completion and an idle listing do not establish a child's current turn state.
-    assert.deepEqual(card.agentsStates, {});
+    assert.deepEqual(card.agentsStates, action === 'wait' ? {} : listed);
     assert.ok(!items.some(item => item.type === 'dynamicToolCall' && item.tool === 'agent'));
   }
   const legacy = await agentTurn({ action: 'list', message: 'Legacy' });
   assert.ok(!legacy.some(item => item.type === 'collabAgentToolCall'));
   assert.deepEqual(legacy.find(item => item.type === 'dynamicToolCall' && item.tool === 'agent')?.contentItems,
-    [{ type: 'inputText', text: children.map((id, index) => `${['researcher', 'reviewer'][index]} (${id.slice(0, 8)})  idle  ${f.cwd}`).join('\n') }]);
+    [{ type: 'inputText', text: children.map((id, index) => `${['researcher', 'reviewer'][index]} (${id.slice(0, 8)})  ${['waiting', 'idle'][index]}  ${f.cwd}`).join('\n') }]);
   const hooked = await agentTurn({ action: 'send', target: 'researcher', message: 'Hooked' });
   assert.ok(!hooked.some(item => item.type === 'collabAgentToolCall'));
   assert.ok(JSON.stringify(hooked.find(item => item.type === 'dynamicToolCall')).includes('Additional hook output'));
@@ -123,8 +124,8 @@ test('phone tool cards and message phases retain their contents after reopening 
     assert.equal(started[0].params.item.tool, card.tool);
     assert.equal(started[0].params.item.senderThreadId, card.senderThreadId);
     assert.deepEqual(started[0].params.item.receiverThreadIds, card.receiverThreadIds);
-    assert.deepEqual(started[0].params.item.agentsStates, {});
-    assert.deepEqual(card.agentsStates, {});
+    assert.deepEqual(started[0].params.item.agentsStates, card.tool === 'listAgents' ? listed : {});
+    assert.deepEqual(card.agentsStates, card.tool === 'listAgents' ? listed : {});
     assert.equal(started[0].params.item.status, card.status);
     assert.equal(card.status, 'completed');
   }

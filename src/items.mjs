@@ -66,11 +66,11 @@ function collabToolItem(id, name, args, result, senderThreadId) {
       Array.isArray(details.agents) && details.total >= details.agents.length &&
       details.agents.every(entry => entry && validId(entry.id) &&
         (entry.name === undefined || typeof entry.name === 'string') &&
-        (entry.ownerId === undefined || validId(entry.ownerId)) && ['busy', 'idle', 'offline'].includes(entry.state))) {
+        (entry.ownerId === undefined || validId(entry.ownerId)) && ['running', 'waiting', 'queued', 'idle'].includes(entry.state))) {
     receiverThreadIds = [...new Set(details.agents.map(entry => entry.id))];
     tool = 'listAgents';
-    // Idle/offline do not imply a completed input or a shut-down thread.
-    agentsStates = Object.fromEntries(details.agents.filter(entry => entry.state === 'busy')
+    // Idle does not imply a completed input or a shut-down thread.
+    agentsStates = Object.fromEntries(details.agents.filter(entry => entry.state !== 'idle')
       .map(entry => [entry.id, { status: 'running', message: null }]));
   } else if (args?.action === 'spawn' && validId(details.id) && typeof details.name === 'string' && details.name &&
       details.queued === false && knownKeys(['id', 'name', 'queued']) &&
