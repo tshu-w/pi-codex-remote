@@ -41,3 +41,7 @@ npm test
 ```
 
 Tests fail when any response or notification violates the schema.
+
+## License
+
+[AGPL-3.0](LICENSE)
