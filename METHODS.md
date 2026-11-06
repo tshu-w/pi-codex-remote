@@ -1,6 +1,6 @@
 # Codex app-server methods
 
-Generated from the Codex 0.160.0 schema and `src/methods.mjs`. 47 implemented, 10 empty, 110 unimplemented. Full definitions and experimental markers are in [vendor/](vendor/).
+Generated from the Codex 0.167.0-alpha.3.2 schema and `src/methods.mjs`. 47 implemented, 10 empty, 123 unimplemented. Full definitions and experimental markers are in [vendor/](vendor/).
 Empty methods return no resources; unimplemented requests return -32601. Wildcards cover methods not already listed above them.
 
 ## Sessions and history
@@ -13,10 +13,11 @@ Empty methods return no resources; unimplemented requests return -32601. Wildcar
 | `thread/archive`, `thread/unarchive`, `thread/delete` | implemented | Moves the session file to the macOS Trash; Restores the session file from the Trash; Moves the session file to the macOS Trash and removes the thread from Remote |
 | `thread/name/set` | implemented |  |
 | `thread/list`, `thread/loaded/list`, `thread/read`, `thread/turns/list`, `thread/items/list` | implemented |  |
+| `thread/items/read` | unimplemented |  |
 | `thread/search` | implemented | Session names and message text on the active branch |
 | `thread/searchOccurrences` | implemented | Visible user messages and final assistant messages, with UTF-16 match ranges and turn cursors |
 | `thread/timeline/list` | implemented | Ordinary history only; newest page first, chronological order within each page |
-| `thread/metadata/update`, `fuzzyFileSearch`, `fuzzyFileSearch/*` | unimplemented |  |
+| `thread/metadata/update`, `thread/readState/update`, `fuzzyFileSearch`, `fuzzyFileSearch/*` | unimplemented |  |
 
 ## Conversation, queues and organization
 
@@ -28,9 +29,9 @@ Empty methods return no resources; unimplemented requests return -32601. Wildcar
 | `thread/queue/*` | implemented | Loaded Remote-owned threads automatically consume queued input; interrupt pauses consumption; Durable pending submissions; text and base64 data URL images only; Loaded Remote-owned threads only; resumes a paused queue. Uncertain dispatches are not retried: inspect history before deleting and resubmitting the entry |
 | `thread/goal/get`, `threadSection/list`, `collaborationMode/list` | empty |  |
 | `thread/goal/*`, `threadSection/*`, `thread/section/move`, `project/*` | unimplemented |  |
-| `thread/realtime/*` | unimplemented |  |
+| `thread/realtime/*`, `thread/sample`, `thread/sample/cancel`, `thread/prediction/request` | unimplemented |  |
 | `turn/settings/update`, `review/start`, `thread/inject_items` | unimplemented |  |
-| `thread/increment_elicitation`, `thread/decrement_elicitation`, `thread/approveGuardianDeniedAction` | unimplemented |  |
+| `thread/increment_elicitation`, `thread/decrement_elicitation`, `thread/approveGuardianDeniedAction`, `thread/guardianReview` | unimplemented |  |
 
 ## Commands and files
 
@@ -42,7 +43,7 @@ Empty methods return no resources; unimplemented requests return -32601. Wildcar
 | `thread/backgroundTerminals/*`, `command/exec/resize`, `process/*` | unimplemented |  |
 | `fs/watch`, `fs/unwatch` | unimplemented |  |
 | `fs/*` | implemented | Private attachment cache, not the host filesystem |
-| `thread/attachment/*` | unimplemented |  |
+| `thread/attachment/*`, `thread/attachmentOwner/list` | unimplemented |  |
 
 ## Models, configuration and extensions
 
@@ -63,7 +64,7 @@ Empty methods return no resources; unimplemented requests return -32601. Wildcar
 | --- | --- | --- |
 | `initialize` | implemented |  |
 | `account/read` | implemented | Returns no account information; Pi manages model authentication |
-| `remoteControl/*`, `account/*`, `userVerification/*` | unimplemented |  |
-| `thread/memoryMode/set`, `memory/*`, `rollout/*` | unimplemented |  |
+| `remoteControl/*`, `account/*`, `accountSession/*`, `userVerification/*` | unimplemented |  |
+| `thread/memoryMode/set`, `thread/memory/read`, `memory/*`, `rollout/*` | unimplemented |  |
 | `environment/*`, `externalAgentConfig/*` | unimplemented |  |
-| `server/diagnostics`, `feedback/upload`, `mock/*` | unimplemented |  |
+| `server/diagnostics`, `feedback/upload`, `feedback/save`, `mock/*` | unimplemented |  |

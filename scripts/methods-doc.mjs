@@ -9,11 +9,11 @@ const features = [
     ['thread/fork'],
     ['thread/archive', 'thread/unarchive', 'thread/delete'],
     ['thread/name/set'],
-    ['thread/list', 'thread/loaded/list', 'thread/read', 'thread/turns/list', 'thread/items/list'],
+    ['thread/list', 'thread/loaded/list', 'thread/read', 'thread/turns/list', 'thread/items/list', 'thread/items/read'],
     ['thread/search'],
     ['thread/searchOccurrences'],
     ['thread/timeline/list'],
-    ['thread/metadata/update', 'fuzzyFileSearch', 'fuzzyFileSearch/*'],
+    ['thread/metadata/update', 'thread/readState/update', 'fuzzyFileSearch', 'fuzzyFileSearch/*'],
   ]],
   ['Conversation, queues and organization', [
     ['turn/start', 'turn/steer', 'turn/interrupt'],
@@ -22,9 +22,9 @@ const features = [
     ['thread/queue/*'],
     ['thread/goal/get', 'threadSection/list', 'collaborationMode/list'],
     ['thread/goal/*', 'threadSection/*', 'thread/section/move', 'project/*'],
-    ['thread/realtime/*'],
+    ['thread/realtime/*', 'thread/sample', 'thread/sample/cancel', 'thread/prediction/request'],
     ['turn/settings/update', 'review/start', 'thread/inject_items'],
-    ['thread/increment_elicitation', 'thread/decrement_elicitation', 'thread/approveGuardianDeniedAction'],
+    ['thread/increment_elicitation', 'thread/decrement_elicitation', 'thread/approveGuardianDeniedAction', 'thread/guardianReview'],
   ]],
   ['Commands and files', [
     ['thread/shellCommand'],
@@ -33,7 +33,7 @@ const features = [
     ['thread/backgroundTerminals/*', 'command/exec/resize', 'process/*'],
     ['fs/watch', 'fs/unwatch'],
     ['fs/*'],
-    ['thread/attachment/*'],
+    ['thread/attachment/*', 'thread/attachmentOwner/list'],
   ]],
   ['Models, configuration and extensions', [
     ['model/list'],
@@ -48,10 +48,10 @@ const features = [
   ['Connection, accounts and other requests', [
     ['initialize'],
     ['account/read'],
-    ['remoteControl/*', 'account/*', 'userVerification/*'],
-    ['thread/memoryMode/set', 'memory/*', 'rollout/*'],
+    ['remoteControl/*', 'account/*', 'accountSession/*', 'userVerification/*'],
+    ['thread/memoryMode/set', 'thread/memory/read', 'memory/*', 'rollout/*'],
     ['environment/*', 'externalAgentConfig/*'],
-    ['server/diagnostics', 'feedback/upload', 'mock/*'],
+    ['server/diagnostics', 'feedback/upload', 'feedback/save', 'mock/*'],
   ]],
 ];
 

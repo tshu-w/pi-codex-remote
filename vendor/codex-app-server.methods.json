@@ -1,5 +1,5 @@
 {
-  "version": "0.160.0",
+  "version": "0.167.0-alpha.3.2",
   "requests": {
     "initialize": {
       "response": "#/definitions/InitializeResponse",
@@ -41,6 +41,14 @@
       "response": "#/definitions/v2/ThreadForkResponse",
       "experimental": false
     },
+    "thread/sample": {
+      "response": "#/definitions/v2/ThreadSampleResponse",
+      "experimental": true
+    },
+    "thread/sample/cancel": {
+      "response": "#/definitions/v2/ThreadSampleCancelResponse",
+      "experimental": true
+    },
     "thread/archive": {
       "response": "#/definitions/v2/ThreadArchiveResponse",
       "experimental": false
@@ -64,6 +72,10 @@
     "thread/name/set": {
       "response": "#/definitions/v2/ThreadSetNameResponse",
       "experimental": false
+    },
+    "thread/prediction/request": {
+      "response": "#/definitions/v2/ThreadPredictionRequestResponse",
+      "experimental": true
     },
     "thread/goal/set": {
       "response": "#/definitions/v2/ThreadGoalSetResponse",
@@ -113,6 +125,10 @@
       "response": "#/definitions/v2/ThreadAttachmentListResponse",
       "experimental": false
     },
+    "thread/attachmentOwner/list": {
+      "response": "#/definitions/v2/ThreadAttachmentOwnerListResponse",
+      "experimental": false
+    },
     "thread/attachment/remove": {
       "response": "#/definitions/v2/ThreadAttachmentRemoveResponse",
       "experimental": false
@@ -127,6 +143,10 @@
     },
     "thread/memoryMode/set": {
       "response": "#/definitions/v2/ThreadMemoryModeSetResponse",
+      "experimental": true
+    },
+    "thread/memory/read": {
+      "response": "#/definitions/v2/ThreadMemoryReadResponse",
       "experimental": true
     },
     "memory/status": {
@@ -237,6 +257,10 @@
       "response": "#/definitions/v2/ThreadReadResponse",
       "experimental": false
     },
+    "thread/readState/update": {
+      "response": "#/definitions/v2/ThreadReadStateUpdateResponse",
+      "experimental": true
+    },
     "thread/turns/list": {
       "response": "#/definitions/v2/ThreadTurnsListResponse",
       "experimental": false
@@ -244,6 +268,14 @@
     "thread/items/list": {
       "response": "#/definitions/v2/ThreadItemsListResponse",
       "experimental": false
+    },
+    "thread/items/read": {
+      "response": "#/definitions/v2/ThreadItemsReadResponse",
+      "experimental": true
+    },
+    "thread/guardianReview": {
+      "response": "#/definitions/v2/ThreadGuardianReviewResponse",
+      "experimental": true
     },
     "thread/inject_items": {
       "response": "#/definitions/v2/ThreadInjectItemsResponse",
@@ -553,9 +585,25 @@
       "response": "#/definitions/v2/BedrockSetupResponse",
       "experimental": true
     },
+    "account/gcp/setup": {
+      "response": "#/definitions/v2/GcpSetupResponse",
+      "experimental": true
+    },
+    "account/bedrock/checkGovCloudRequirements": {
+      "response": "#/definitions/v2/BedrockCheckGovCloudRequirementsResponse",
+      "experimental": true
+    },
     "account/login/cancel": {
       "response": "#/definitions/v2/CancelLoginAccountResponse",
       "experimental": false
+    },
+    "accountSession/list": {
+      "response": "#/definitions/v2/AccountSessionsResponse",
+      "experimental": true
+    },
+    "accountSession/switch": {
+      "response": "#/definitions/v2/AccountSessionsSwitchResponse",
+      "experimental": true
     },
     "account/logout": {
       "response": "#/definitions/v2/LogoutAccountResponse",
@@ -583,6 +631,10 @@
     },
     "feedback/upload": {
       "response": "#/definitions/v2/FeedbackUploadResponse",
+      "experimental": false
+    },
+    "feedback/save": {
+      "response": "#/definitions/v2/FeedbackSaveResponse",
       "experimental": false
     },
     "command/exec": {
@@ -674,6 +726,7 @@
     "error": "#/definitions/v2/ErrorNotification",
     "thread/started": "#/definitions/v2/ThreadStartedNotification",
     "thread/status/changed": "#/definitions/v2/ThreadStatusChangedNotification",
+    "thread/readState/changed": "#/definitions/v2/ThreadReadStateChangedNotification",
     "thread/archived": "#/definitions/v2/ThreadArchivedNotification",
     "thread/deleted": "#/definitions/v2/ThreadDeletedNotification",
     "thread/unarchived": "#/definitions/v2/ThreadUnarchivedNotification",
@@ -681,8 +734,10 @@
     "thread/reverted": "#/definitions/v2/ThreadRevertedNotification",
     "skills/changed": "#/definitions/v2/SkillsChangedNotification",
     "thread/name/updated": "#/definitions/v2/ThreadNameUpdatedNotification",
+    "thread/section/changed": "#/definitions/v2/ThreadSectionChangedNotification",
     "thread/attachment/updated": "#/definitions/v2/ThreadAttachmentUpdatedNotification",
     "thread/goal/updated": "#/definitions/v2/ThreadGoalUpdatedNotification",
+    "thread/prediction/updated": "#/definitions/v2/ThreadPredictionUpdatedNotification",
     "thread/goal/cleared": "#/definitions/v2/ThreadGoalClearedNotification",
     "thread/queue/changed": "#/definitions/v2/ThreadQueueChangedNotification",
     "project/changed": "#/definitions/v2/ProjectChangedNotification",
