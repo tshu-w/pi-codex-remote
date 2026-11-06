@@ -40,7 +40,8 @@ export const threadsHandlers = {
         const sourceKind = record.isSubAgent ? (this.threadSource(record).subAgent.thread_spawn ? 'subAgentThreadSpawn' : 'subAgentOther') : 'unknown';
         if (!params.sourceKinds.includes(sourceKind) && !(record.isSubAgent && params.sourceKinds.includes('subAgent'))) return false;
       } else if (record.isSubAgent && (!(params.parentThreadId || params.ancestorThreadId) || params.sourceKinds != null)) return false;
-      if (params.projectId != null || params.sectionId != null) return false;
+      if (params.projectId != null || params.sectionId != null || params.attachedToThreadId != null) return false;
+      if (params.excludedThreadIds?.includes(record.id)) return false;
       if (params.parentThreadId && (!record.isSubAgent || record.parentSessionId !== params.parentThreadId)) return false;
       if (params.ancestorThreadId) {
         if (record.id === params.ancestorThreadId) return false;

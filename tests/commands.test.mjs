@@ -62,6 +62,8 @@ test('search finds message text, and delete moves the session to Trash and remov
   const found = await client.request('thread/search', { searchTerm: 'WALRUS' });
   assert.deepEqual(found.data.map(hit => hit.thread.id), [thread.id]);
   assert.match(found.data[0].snippet, /walrus/);
+  assert.deepEqual((await client.request('thread/list', { excludedThreadIds: [thread.id] })).data.map(entry => entry.id), [other.id]);
+  assert.deepEqual((await client.request('thread/list', { attachedToThreadId: thread.id })).data, [], 'Pi has no attached threads');
 
   assert.deepEqual(await client.request('thread/delete', { threadId: thread.id }), {});
   await client.notification('thread/deleted', params => params.threadId === thread.id);
