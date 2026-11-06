@@ -423,5 +423,6 @@ export const turnsMethods = {
     this.notify(active.rpc.id, 'turn/completed', { threadId: active.rpc.id, turn });
     this.notify(active.rpc.id, 'thread/status/changed', { threadId: active.rpc.id, status: { type: this.loaded.has(active.rpc.id) ? 'idle' : 'notLoaded' } });
     this.queueFinished(active);
+    void this.releaseIdle();
   },
 };

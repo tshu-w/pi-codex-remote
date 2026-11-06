@@ -402,22 +402,28 @@ export class Protocol {
           if (count) this.inUse.set(threadId, count);
           else this.inUse.delete(threadId);
           this.lastUsed.set(threadId, Date.now());
+          void this.releaseIdle();
         }
       }
     }
   }
 
-  // Like Codex app-server, an unsubscribed thread with no turn is unloaded after a delay.
+  // A saved thread is unloaded as soon as Pi has no work, so another Pi can open it; the next send reopens it.
+  // Like Codex app-server, other threads are unloaded once unsubscribed after a delay.
   releasable(threadId, rpc) {
+    const queue = this.meta.queues?.[threadId];
+    const saved = [...this.sessions.persistedPaths.values()].includes(rpc);
     return this.loaded.get(threadId) === rpc && !rpc.failure && !rpc.closing
-      && !this.subscribers.has(threadId) && !this.active.has(threadId) && !this.inUse.has(threadId) && !this.opening.has(threadId)
-      && !rpc.state.isStreaming && !rpc.state.isCompacting && !rpc.state.pendingMessageCount
-      && Date.now() - (this.lastUsed.get(threadId) ?? 0) >= this.releaseDelayMs;
+      && !this.active.has(threadId) && !this.inUse.has(threadId) && !this.opening.has(threadId)
+      && !rpc.state.isStreaming && !rpc.state.isCompacting && !rpc.state.pendingMessageCount && !(queue?.items.length && !queue.paused)
+      && (saved || (!this.subscribers.has(threadId) && Date.now() - (this.lastUsed.get(threadId) ?? 0) >= this.releaseDelayMs));
   }
 
   async releaseIdle() {
-    if (this.releasing || this.queueClosing) return;
+    if (this.queueClosing) return;
+    if (this.releasing) { this.releaseAgain = true; return; }
     this.releasing = true;
+    this.releaseAgain = false;
     try {
       for (const [threadId, rpc] of [...this.loaded]) if (!this.mutating.has(threadId) && !this.mutationQueues.has(threadId) && this.releasable(threadId, rpc)) await this.releaseThread(threadId, rpc);
       for (const [cwd, opening] of [...this.probes]) {
@@ -427,7 +433,10 @@ export class Protocol {
         this.probes.delete(cwd);
         await rpc?.close();
       }
-    } finally { this.releasing = false; }
+    } finally {
+      this.releasing = false;
+      if (this.releaseAgain) void this.releaseIdle();
+    }
   }
 
   // Pi decides whether it has work, including other extensions' background work; a busy Pi is kept and retried later.

@@ -9,7 +9,9 @@ const text = content => typeof content === 'string' ? content : content.filter(b
 export default function (pi) {
   let release;
   pi.registerCommand('fixture-release', { description: 'Release a held reply', handler: async () => release?.() });
-  pi.events.on('busy:query', query => { if (existsSync(join(process.cwd(), 'fixture-busy'))) query.busy = true; });
+  const children = new Map();
+  // Like pi-agents, a waiting child (the researcher) keeps Pi busy.
+  pi.events.on('busy:query', query => { if (existsSync(join(process.cwd(), 'fixture-busy')) || children.has('researcher')) query.busy = true; });
   pi.on('tool_call', async (event, ctx) => {
     if (event.toolName === 'write' && event.input.path === 'blocked.txt' && !(await ctx.ui.confirm('Fixture permission', 'Allow write?'))) return { block: true, reason: 'Fixture write denied' };
   });
@@ -28,7 +30,6 @@ export default function (pi) {
       return { content: [{ type: 'text', text: 'nested done' }] };
     },
   });
-  const children = new Map();
   pi.registerTool({ name: 'agent', label: 'Fixture agent', description: 'Offline pi-agents contract fixture',
     parameters: { type: 'object', properties: { action: { type: 'string' }, name: { type: 'string' }, target: {}, message: { type: 'string' }, deliverAs: { type: 'string' } }, required: ['action'] },
     async execute(_id, args, _signal, _update, ctx) {

@@ -135,13 +135,14 @@ export const queueMethods = {
         if (this.queueClosing) return;
         if (pause) { await this.queuePause(threadId); return; }
         const queue = this.meta.queues?.[threadId];
-        if (!queue?.items.length || queue.paused || this.active.has(threadId) || !this.loaded.has(threadId) || !this.meta.owned?.[threadId] || this.meta.trashed?.[threadId] || this.meta.archives?.[threadId]) return;
+        if (!queue?.items.length || queue.paused || this.active.has(threadId) || !this.meta.owned?.[threadId] || this.meta.trashed?.[threadId] || this.meta.archives?.[threadId]) return;
         await this.dispatchQueue(threadId);
       } catch (error) {
         this.notify(threadId, 'error', { threadId, turnId: this.meta.queues?.[threadId]?.intent?.turnId ?? '', willRetry: false,
           error: { message: error.message, additionalDetails: null, codexErrorInfo: null } });
       } finally {
         releaseMutation?.();
+        void this.releaseIdle();
       }
     })();
   },
@@ -149,8 +150,8 @@ export const queueMethods = {
   async dispatchQueue(threadId, queuedSubmissionId, emit) {
     const queue = await this.requireQueue(threadId, emit);
     if (queue.intent) throw uncertain(queue.intent);
-    const rpc = this.loaded.get(threadId);
-    if (!rpc || !this.meta.owned?.[threadId]) throw invalid('Resume the thread before starting a queued submission.');
+    if (!this.meta.owned?.[threadId]) throw invalid('Send a task to take over the thread before starting a queued submission.');
+    const rpc = await this.rpc(threadId);
     if (this.queueClosing) throw invalid('Remote is shutting down.');
     await rpc.refresh();
     if (this.queueClosing) throw invalid('Remote is shutting down.');

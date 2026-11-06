@@ -52,7 +52,6 @@ test('durable queue edits, ordering, selected start, interruption and resume', {
   await protocol.close();
   const second = f.start();
   assert.deepEqual((await second.client.request('thread/queue/list', { threadId })).data.map(item => item.id), [persisted.id]);
-  assert.match((await second.client.raw('thread/queue/start', { threadId })).error.message, /resume/i);
   await second.client.request('thread/resume', { threadId, excludeTurns: true });
   await waitFor(async () => (await f.calls()).some(call => call.prompt === 'after-restart') && !second.protocol.active.has(threadId), 'resume drains durable queue');
   assert.deepEqual((await second.client.request('thread/queue/list', { threadId })).data, []);

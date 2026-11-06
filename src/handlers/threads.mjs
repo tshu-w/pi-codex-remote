@@ -82,7 +82,8 @@ export const threadsHandlers = {
         catch { readOnly = true; }
       }
     }
-    if (readOnly) {
+    // Viewing an unloaded thread reads its history without opening the session; sending opens it.
+    if (readOnly || !this.loaded.has(params.threadId)) {
       await this.discover();
       const record = this.catalog.get(params.threadId);
       if (!record) throw invalid('Thread not found.');
@@ -102,13 +103,16 @@ export const threadsHandlers = {
       providerSettings(params, { state: { model: saved.model ?? probe.state.model } });
       const model = modelKey(saved.model ?? probe.state.model);
       const thinkingLevel = saved.thinkingLevel ?? probe.state.thinkingLevel;
-      if ((params.model && params.model !== model) || (effort != null && effort !== thinkingLevel)) throw invalid('External history resume is read-only. Keep its saved settings when opening, then send a task to take over after closing the desktop session.');
-      this.subscribe(params.threadId, emit);
-      const response = await this.threadResponse(probe, !params.excludeTurns, params.threadId);
-      response.model = model;
-      response.reasoningEffort = thinkingLevel;
-      if (params.initialTurnsPage) response.initialTurnsPage = await this.dispatch('thread/turns/list', { ...params.initialTurnsPage, threadId: params.threadId }, emit);
-      return response;
+      const changed = (params.model && params.model !== model) || (effort != null && effort !== thinkingLevel);
+      if (changed && readOnly) throw invalid('External history resume is read-only. Keep its saved settings when opening, then send a task to take over after closing the desktop session.');
+      if (!changed) {
+        this.subscribe(params.threadId, emit);
+        const response = await this.threadResponse(probe, !params.excludeTurns, params.threadId);
+        response.model = model;
+        response.reasoningEffort = thinkingLevel;
+        if (params.initialTurnsPage) response.initialTurnsPage = await this.dispatch('thread/turns/list', { ...params.initialTurnsPage, threadId: params.threadId }, emit);
+        return response;
+      }
     }
     const rpc = await this.rpc(params.threadId);
     workspaceSettings(params, rpc.cwd);
