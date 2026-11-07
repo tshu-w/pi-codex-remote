@@ -63,6 +63,10 @@ export class RpcSession {
   }
 
   receive(record) {
+    if (record.type === 'extension_ui_request' && record.method === 'setStatus' && record.statusKey === 'codex-remote-model-scope') {
+      this.modelScope = JSON.parse(record.statusText);
+      return;
+    }
     if ((this.initializing || !this.listeners.size) && record.type === 'extension_ui_request' && ['select', 'confirm', 'input', 'editor'].includes(record.method)) {
       this.startupDialog = record;
       const title = String(record.title ?? record.method).replace(/\s+/g, ' ').trim();

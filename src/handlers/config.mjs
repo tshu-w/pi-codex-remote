@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { protocolMethods } from '../schema.mjs';
 import { modelKey, invalid, supportedEfforts } from '../codex.mjs';
 import { offsetPage } from '../pages.mjs';
+import { sessionSettings } from '../history.mjs';
 
 export const configHandlers = {
   async 'initialize'(params, emit) {
@@ -13,6 +14,7 @@ export const configHandlers = {
     return { userAgent: `pi-codex-remote/${protocolMethods.version}`, codexHome: this.stateDir, platformFamily: 'unix', platformOs: platform() === 'darwin' ? 'macos' : platform() };
   },
   async 'account/read'() { return { account: null, requiresOpenaiAuth: false }; },
+  async 'getAuthStatus'() { return { authMethod: null, authToken: null, requiresOpenaiAuth: false }; },
   async 'modelProvider/capabilities/read'() { return { imageGeneration: false, namespaceTools: false, webSearch: false }; },
   async 'config/read'(params) {
     const rpc = await this.probeRpc(params.cwd ?? this.cwd);
@@ -61,11 +63,21 @@ export const configHandlers = {
     }));
     return { data };
   },
-  async 'model/list'(params) {
+  async 'model/list'(params, emit) {
     const rpc = await this.probeRpc();
     const { models } = await rpc.request('get_available_models');
     const current = modelKey(rpc.state.model);
-    const page = offsetPage(models, params, 100);
+    const scoped = rpc.modelScope?.length ? new Set(rpc.modelScope.map(modelKey)) : null;
+    if (scoped) {
+      scoped.add(current);
+      for (const [threadId, listeners] of this.subscribers) {
+        if (!listeners.has(emit)) continue;
+        const model = this.loaded.get(threadId)?.state.model ?? sessionSettings((await this.entries(threadId)).entries).model;
+        if (model) scoped.add(modelKey(model));
+      }
+    }
+    const visible = model => !scoped || scoped.has(modelKey(model));
+    const page = offsetPage(params.includeHidden ? models : models.filter(visible), params, 100);
     return {
       data: page.data.map(model => {
         const key = modelKey(model);
@@ -73,7 +85,7 @@ export const configHandlers = {
         const isDefault = key === current;
         return {
           id: key, model: key, displayName: model.name ?? model.id, description: model.provider,
-          hidden: false, isDefault, inputModalities: model.input ?? ['text'],
+          hidden: !visible(model), isDefault, inputModalities: model.input ?? ['text'],
           supportedReasoningEfforts: efforts.map(reasoningEffort => ({ reasoningEffort, description: reasoningEffort })),
           defaultReasoningEffort: isDefault ? rpc.state.thinkingLevel ?? 'off' : efforts.includes('medium') ? 'medium' : efforts[0],
           additionalSpeedTiers: [], availabilityNux: null, defaultServiceTier: null, modelSpecialty: null,

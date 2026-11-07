@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { realpath, stat } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
 import { historyPath, sessionSettings } from '../history.mjs';
 import { revertCommand, revertEntryType } from '../revert-command.mjs';
 import { modelKey, invalid, supportedEfforts, applyEffort, workspaceSettings, executionSettings, providerSettings, modelIdentity } from '../codex.mjs';
@@ -70,9 +70,31 @@ export const threadsHandlers = {
     return { thread: await this.thread(params.threadId, params.includeTurns) };
   },
   async 'thread/resume'(params, emit) {
-    const effort = executionSettings(params);
-    if (params.history != null || params.path) throw invalid('History and path overrides are unsupported; resume by threadId.');
+    const settings = { ...params, developerInstructions: undefined, config: { ...params.config } };
+    if (['none', 'friendly', 'pragmatic'].includes(settings.personality)) settings.personality = undefined;
+    for (const key of ['apps_mcp_path_override', 'code_mode_tool_description_first', 'collaboration_modes', 'item_ids', 'image_detail_original',
+      'unified_image_budget', 'mcp_oauth_refresh_coordination', 'untrusted_as_tool_output', 'image_resize_notice',
+      'code_mode_interrupt', 'instant_interrupt', 'request_rule', 'image_generation', 'workspace_dependencies',
+      'guardian_approval', 'guardian_reuse_parent_compaction', 'incremental_tools', 'skill_catalog_deltas',
+      'output_token_replay', 'deferred_tool_world_state', 'write_stdin_approval', 'enable_mcp_apps',
+      'recommended_plugins', 'compaction_image_budget', 'guardianv2_decisions_comparison']) {
+      if (typeof settings.config[`features.${key}`] === 'boolean') delete settings.config[`features.${key}`];
+    }
+    for (const key of ['features.guardianv2', 'apps.connector_openai_pages.tools']) {
+      const value = settings.config[key];
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) delete settings.config[key];
+    }
+    const effort = executionSettings(settings);
+    if (params.history != null) throw invalid('History overrides are unsupported; resume by threadId.');
+    if (params.path != null && typeof params.path !== 'string') throw invalid('Resume path must be a string.');
     await this.discover();
+    if (params.path) {
+      const record = this.catalog.get(params.threadId);
+      if (!record) throw invalid('Thread not found.');
+      if (!isAbsolute(params.path) || await realpath(params.path).catch(() => null) !== await realpath(record.path)) {
+        throw invalid('Resume path must match the existing Pi session selected by threadId.');
+      }
+    }
     let readOnly = this.catalog.get(params.threadId)?.isSubAgent || !this.meta.owned?.[params.threadId];
     if (!readOnly && !this.loaded.has(params.threadId)) {
       await this.discover();

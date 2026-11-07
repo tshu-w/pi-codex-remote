@@ -48,6 +48,7 @@ const features = [
   ['Connection, accounts and other requests', [
     ['initialize'],
     ['account/read'],
+    ['getAuthStatus'],
     ['remoteControl/*', 'account/*', 'accountSession/*', 'userVerification/*'],
     ['thread/memoryMode/set', 'thread/memory/read', 'memory/*', 'rollout/*'],
     ['environment/*', 'externalAgentConfig/*'],

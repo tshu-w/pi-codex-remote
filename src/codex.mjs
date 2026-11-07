@@ -15,6 +15,7 @@ export function workspaceSettings(params, cwd) {
   if (params.runtimeWorkspaceRoots != null && (params.runtimeWorkspaceRoots.length !== 1 || resolve(params.runtimeWorkspaceRoots[0]) !== cwd)) throw invalid('Pi supports only the session working directory as its runtime workspace root.');
 }
 export function executionSettings(params) {
+  if (params.disabledPluginIds != null && (!Array.isArray(params.disabledPluginIds) || params.disabledPluginIds.length)) throw invalid('Nonempty or malformed disabledPluginIds are unsupported; Pi plugins cannot be disabled by the desktop client.');
   if (params.permissions != null) {
     if (params.permissions !== ':danger-full-access') throw invalid('Only the :danger-full-access permission profile is supported; Pi local permission hooks remain enforced.');
     if (params.sandbox != null || params.sandboxPolicy != null) throw invalid('permissions cannot be combined with sandbox or sandboxPolicy.');

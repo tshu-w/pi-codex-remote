@@ -17,12 +17,16 @@ export default function codexRemote(pi: ExtensionAPI) {
       sessionFile: ctx.sessionManager.getSessionFile(),
       sessionId: ctx.sessionManager.getSessionId(),
     });
+    if (ctx.mode === "rpc" && process.env.PI_CODEX_REMOTE_RPC === "1") {
+      ctx.ui.setStatus("codex-remote-model-scope", JSON.stringify(ctx.scopedModels.map(({ model }) => ({ provider: model.provider, id: model.id }))));
+    }
   });
   pi.on("session_shutdown", (event) => {
     liveSessions.shutdown(event.reason);
   });
 
   pi.on("input", async (event, ctx) => {
+    if (ctx.mode === "tui" && event.source === "interactive") ctx.ui.setWidget("codex-remote-pair", undefined);
     if (ctx.mode !== "rpc" || process.env.PI_CODEX_REMOTE_RPC !== "1" || !event.images?.length) return;
     for (const image of event.images) {
       const decoded = await resizeImage(Buffer.from(image.data, "base64"), image.mimeType, ctx.model?.inputLimits?.images?.resize).catch(() => null);

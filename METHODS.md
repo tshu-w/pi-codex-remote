@@ -1,6 +1,6 @@
 # Codex app-server methods
 
-Generated from the Codex 0.167.0-alpha.3.2 schema and `src/methods.mjs`. 47 implemented, 10 empty, 123 unimplemented. Full definitions and experimental markers are in [vendor/](vendor/).
+Generated from the Codex 0.167.0-alpha.3.2 schema and `src/methods.mjs`. 48 implemented, 10 empty, 123 unimplemented. Full definitions and experimental markers are in [vendor/](vendor/).
 Empty methods return no resources; unimplemented requests return -32601. Wildcards cover methods not already listed above them.
 
 ## Sessions and history
@@ -8,7 +8,7 @@ Empty methods return no resources; unimplemented requests return -32601. Wildcar
 | Methods | Status | Limits and behavior |
 | --- | --- | --- |
 | `thread/start`, `thread/unsubscribe` | implemented |  |
-| `thread/resume` | implemented | Sessions open in another Pi are read-only |
+| `thread/resume` | implemented | Sessions open in another Pi are read-only; path must match threadId; history overrides are unsupported. developerInstructions and named compatibility settings are ignored |
 | `thread/fork` | implemented | Whole thread, through a turn, or before a turn |
 | `thread/archive`, `thread/unarchive`, `thread/delete` | implemented | Moves the session file to the macOS Trash; Restores the session file from the Trash; Moves the session file to the macOS Trash and removes the thread from Remote |
 | `thread/name/set` | implemented |  |
@@ -23,7 +23,7 @@ Empty methods return no resources; unimplemented requests return -32601. Wildcar
 
 | Methods | Status | Limits and behavior |
 | --- | --- | --- |
-| `turn/start`, `turn/steer`, `turn/interrupt` | implemented |  |
+| `turn/start`, `turn/steer`, `turn/interrupt` | implemented | additionalContext is ignored; include needed context in the message. Default collaborationMode maps model and effort; conflicts, plan mode, custom instructions and nonempty disabledPluginIds are unsupported |
 | `thread/settings/update` | implemented | Model and thinking level only |
 | `thread/compact/start`, `thread/revert` | implemented | Keeps the abandoned branch in the Pi session file |
 | `thread/queue/*` | implemented | Loaded Remote-owned threads automatically consume queued input; interrupt pauses consumption; Durable pending submissions; text and base64 data URL images only; Loaded Remote-owned threads only; resumes a paused queue. Uncertain dispatches are not retried: inspect history before deleting and resubmitting the entry |
@@ -42,14 +42,14 @@ Empty methods return no resources; unimplemented requests return -32601. Wildcar
 | `thread/backgroundTerminals/list` | empty | Pi has no background terminal registry |
 | `thread/backgroundTerminals/*`, `command/exec/resize`, `process/*` | unimplemented |  |
 | `fs/watch`, `fs/unwatch` | unimplemented |  |
-| `fs/*` | implemented | Private attachment cache, not the host filesystem |
+| `fs/*` | implemented | Private attachment cache and image previews only; Optional visualization setup returns EACCES |
 | `thread/attachment/*`, `thread/attachmentOwner/list` | unimplemented |  |
 
 ## Models, configuration and extensions
 
 | Methods | Status | Limits and behavior |
 | --- | --- | --- |
-| `model/list` | implemented | All Pi models with their supported thinking levels |
+| `model/list` | implemented | Pi scope plus current/subscribed models; includeHidden or no scope returns all available models |
 | `modelProvider/capabilities/read` | implemented | Codex provider capability flags are false; this does not restrict Pi tools |
 | `permissionProfile/list`, `configRequirements/read` | implemented | Only :danger-full-access; Pi permission hooks still apply; Only Pi execution without a Codex sandbox |
 | `config/read` | implemented | Current Pi model and thinking level; no Codex config layers |
@@ -64,6 +64,7 @@ Empty methods return no resources; unimplemented requests return -32601. Wildcar
 | --- | --- | --- |
 | `initialize` | implemented |  |
 | `account/read` | implemented | Returns no account information; Pi manages model authentication |
+| `getAuthStatus` | implemented | Legacy handshake; Pi manages authentication, no token is returned |
 | `remoteControl/*`, `account/*`, `accountSession/*`, `userVerification/*` | unimplemented |  |
 | `thread/memoryMode/set`, `thread/memory/read`, `memory/*`, `rollout/*` | unimplemented |  |
 | `environment/*`, `externalAgentConfig/*` | unimplemented |  |

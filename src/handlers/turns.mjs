@@ -84,6 +84,21 @@ export const turnsHandlers = {
 
 export const turnsMethods = {
   async startTurn(params, emit, { turnId = randomUUID() } = {}) {
+    params = { ...params, additionalContext: undefined };
+    const collaboration = params.collaborationMode;
+    if (collaboration != null) {
+      const settings = collaboration.settings;
+      if (collaboration.mode !== 'default' || !settings || typeof settings !== 'object' || Array.isArray(settings)
+        || settings.developer_instructions != null) throw invalid('Only default collaborationMode without developer instructions is supported.');
+      if (Object.keys(collaboration).some(key => !['mode', 'settings'].includes(key))
+        || Object.keys(settings).some(key => !['model', 'reasoning_effort', 'developer_instructions'].includes(key))) throw invalid('Unknown collaborationMode settings are unsupported.');
+      for (const model of [settings.model, params.model]) if (model != null && (typeof model !== 'string' || !model)) throw invalid('collaborationMode requires a provider-qualified Pi model.');
+      if (settings.model != null && params.model != null && JSON.stringify(modelIdentity(params.model)) !== JSON.stringify(modelIdentity(settings.model))) throw invalid('collaborationMode model conflicts with the requested model.');
+      const efforts = [params.reasoningEffort, params.effort, params.config?.model_reasoning_effort, settings.reasoning_effort]
+        .filter(value => value != null).map(value => value === 'none' ? 'off' : value);
+      if (new Set(efforts).size > 1) throw invalid('collaborationMode reasoning effort conflicts with the requested effort.');
+      params = { ...params, model: settings.model ?? params.model, effort: settings.reasoning_effort ?? params.effort, collaborationMode: undefined };
+    }
     const effort = executionSettings(params);
     const prompt = inputPrompt(params.input, this.attachments, emit);
     if (params.model) modelIdentity(params.model);
