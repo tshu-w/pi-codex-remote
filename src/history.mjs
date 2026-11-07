@@ -212,6 +212,18 @@ function userContent(content, imageMapper) {
 // Agents a session started, which its notices name by a short ID.
 export const sessionAgents = entries => entries.flatMap(entry => entry.type === 'custom' && entry.customType === 'pi-agents-agent' && typeof entry.data?.id === 'string' ? [{ id: entry.data.id, name: entry.data.name }] : []);
 
+// Agents with an input queued or running: their metadata, then input changes; older records carry all inputs.
+export function runningAgents(entries) {
+  const inputs = new Map();
+  for (const entry of entries) {
+    if (entry.type !== 'custom' || typeof entry.data !== 'object' || !entry.data) continue;
+    if (entry.customType === 'pi-agents-agent' && Array.isArray(entry.data.inputs)) inputs.set(entry.data.id, new Map(entry.data.inputs.map(input => [input.id, input.state])));
+    else if (entry.customType === 'pi-agents-agent' && !inputs.has(entry.data.id)) inputs.set(entry.data.id, new Map());
+    else if (entry.customType === 'pi-agents-input') inputs.get(entry.data.agentId)?.set(entry.data.id, entry.data.state);
+  }
+  return new Set([...inputs].filter(([, states]) => [...states.values()].some(state => ['queued', 'running'].includes(state))).map(([id]) => id));
+}
+
 export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = {}, cwd = '', senderThreadId, imageMapper = block => ({ type: 'image', url: `data:${block.mimeType};base64,${block.data}` }) } = {}) {
   const turns = [];
   let turn;

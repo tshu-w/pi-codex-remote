@@ -52,6 +52,7 @@ export class Protocol {
     this.active = new Map();
     this.execProcesses = new Map();
     this.meta = { archives: {}, entries: {}, parents: {} };
+    this.runningAgents = new Map();
     this.ready = this.loadMetadata();
     this.saving = Promise.resolve();
     this.releaseDelayMs = releaseDelayMs;
@@ -297,7 +298,7 @@ export class Protocol {
       modelProvider: 'custom', cliVersion: 'pi',
       createdAt: seconds(record.created), updatedAt: seconds(record.modified), recencyAt: seconds(record.modified),
       ephemeral: !record.path, forkedFromId: record.isSubAgent ? null : this.meta.parents?.[threadId] ?? record.parentSessionId ?? null, parentThreadId: record.isSubAgent ? record.parentSessionId ?? null : null,
-      status: this.active.has(threadId) ? { type: 'active', activeFlags: [] } : { type: rpc ? 'idle' : 'notLoaded' },
+      status: this.threadStatus(threadId),
       turns: includeTurns ? await this.turns(threadId) : [], source, threadSource: 'pi',
       agentNickname: nickname, agentRole: null, canAcceptDirectInput: !record.isSubAgent && !this.meta.trashed?.[threadId] && !this.meta.trashPending?.[threadId] && (this.inputEligibility.get(threadId) ?? Boolean(this.meta.owned?.[threadId])), extra: null, gitInfo: null,
       historyMode: 'paginated', projectId: null, section: null, sectionEnteredAt: null,
@@ -474,6 +475,7 @@ export class Protocol {
       this.loaded.delete(threadId);
       this.lastUsed.delete(threadId);
       this.notify(null, 'thread/closed', { threadId });
+      this.setRunningAgents(threadId, new Set());
     } catch {
       this.lastUsed.set(threadId, Date.now());
     } finally {

@@ -137,6 +137,25 @@ test('an Agent result that starts a host turn after an answer shows the Agent co
   }
 });
 
+test('an owned Agent thread is active from its input until its result, while its owner is connected', async t => {
+  const { rpc, client, id } = await setup(t);
+  const worker = '01a1a515-0000-7000-8000-000000000002';
+  const status = () => client.records.filter(record => record.method === 'thread/status/changed' && record.params.threadId === worker).map(record => record.params.status.type);
+  const entry = (customType, data) => rpc.entries.push({ type: 'custom', id: `e${rpc.entries.length}`, parentId: rpc.entries.at(-1)?.id ?? null, timestamp: new Date().toISOString(), customType, data });
+  entry('pi-agents-agent', { id: worker, name: 'worker' });
+  entry('pi-agents-input', { agentId: worker, id: 'i1', state: 'running' });
+  rpc.emit({ type: 'tool_execution_end', toolCallId: 's1', toolName: 'agent', result: { content: [], details: { id: worker, name: 'worker', queued: false } }, isError: false });
+  await waitFor(() => status().length === 1, 'active');
+  entry('pi-agents-input', { agentId: worker, id: 'i1', state: 'completed' });
+  rpc.emit({ type: 'message_end', message: { role: 'custom', customType: 'pi-agents', content: '<agent-result name="worker" id="01a1a515" status="completed">\ndone\n</agent-result>', display: true, timestamp: Date.now() } });
+  await waitFor(() => status().length === 2, 'idle');
+  // History read on reconnect shows the Agent running again, until its owner's Pi exits.
+  entry('pi-agents-input', { agentId: worker, id: 'i2', state: 'queued' });
+  await client.request('thread/turns/list', { threadId: id });
+  rpc.emit({ type: 'process_exit' });
+  assert.deepEqual(status(), ['active', 'notLoaded', 'active', 'notLoaded']);
+});
+
 test('Remote steers and interrupts a terminal turn without clearing Pi\'s queue', async t => {
   const { rpc, client, id } = await setup(t);
   rpc.emit({ type: 'agent_start' });

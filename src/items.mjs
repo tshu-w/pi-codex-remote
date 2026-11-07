@@ -203,6 +203,14 @@ export function noticeItems(id, message, { cwd = '', agents = [] } = {}) {
       source: 'agent', status: details.status === 'completed' ? 'completed' : 'failed',
     }];
   }
+  // A message from another Agent folds as a step with its body.
+  const blocks = typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : message.content ?? [];
+  const body = customType === 'pi-agents' && details?.sender && /^<agent-message [^>\n]*>\n([\s\S]*)\n<\/agent-message>$/.exec(blocks.filter(block => block.type === 'text').map(block => block.text).join('\n'))?.[1];
+  if (typeof body === 'string') return [{
+    type: 'dynamicToolCall', id, tool: 'agent', namespace: null, arguments: { action: 'message', from: details.sender.name ?? details.sender.id },
+    contentItems: [{ type: 'inputText', text: body }, ...blocks.filter(block => block.type === 'image').map(block => ({ type: 'inputImage', imageUrl: `data:${block.mimeType};base64,${block.data}` }))],
+    durationMs: null, status: 'completed', success: true,
+  }];
   const results = customType === 'pi-agents' && Array.isArray(details?.results) ? details.results : [];
   const resolved = results.map(result => agents.findLast(agent => typeof result.id === 'string' && agent.id.startsWith(result.id) && agent.name === result.name));
   if (!results.length || resolved.some(agent => !agent)) return [{ type: 'agentMessage', id, text: noticeText(message), phase: 'commentary', delivery: null, memoryCitation: null }];

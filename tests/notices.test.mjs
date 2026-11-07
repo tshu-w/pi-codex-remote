@@ -1,7 +1,7 @@
 // Steered input and notices from extensions such as pi-exec and pi-agents, in history and live.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { projectTurns } from '../src/history.mjs';
+import { projectTurns, runningAgents } from '../src/history.mjs';
 import { model, setup, waitFor } from './harness.mjs';
 
 const timestamp = new Date(0).toISOString();
@@ -70,7 +70,9 @@ test('notices show as the steps they report, or as a header and their body', () 
     results('n3', ['a', 'completed', '**first**'], ['b', 'aborted', 'second']),
     // Without a record of the Agent, the result reads as text.
     results('n4', ['c', 'completed', 'third']),
-    notice('n5', '<agent-message name="a" id="0a" note="Reply with send">\nhi\n</agent-message>'),
+    notice('n5', '<agent-message name="a" id="0a" note="Reply with send">\nhi\n</agent-message>', 'pi-agents', { delivery: 'followUp', sender: { id: '0a', name: 'a' } }),
+    // Without its details, a message reads as text.
+    notice('n7', '<agent-message name="a" id="0a">\nbye\n</agent-message>'),
     notice('n6', [text('Ran `/program x`'), { type: 'image', mimeType: 'image/png', data: 'AA==' }], 'pi-agents-program'),
   ]), { cwd: '/work' });
   const items = turns[0].items.slice(2);
@@ -88,11 +90,25 @@ test('notices show as the steps they report, or as a header and their body', () 
     { type: 'subAgentActivity', id: 'n3:2', kind: 'interrupted', agentThreadId: '0b-full', agentPath: 'b', model: null, reasoningEffort: null },
     step('n3:3', 'b', 'aborted', 'second'),
   ]);
-  assert.deepEqual(items.slice(6).map(item => [item.type, item.phase, item.text]), [
+  assert.deepEqual(items[7], { type: 'dynamicToolCall', id: 'n5', tool: 'agent', namespace: null, arguments: { action: 'message', from: 'a' },
+    contentItems: [{ type: 'inputText', text: 'hi' }], durationMs: null, status: 'completed', success: true });
+  assert.deepEqual(items.filter((_, index) => index !== 7).slice(6).map(item => [item.type, item.phase, item.text]), [
     ['agentMessage', 'commentary', 'Agent result from **c** (0c): completed\n\nthird'],
-    ['agentMessage', 'commentary', 'Message from **a** (0a)\n\nhi'],
+    ['agentMessage', 'commentary', 'Message from **a** (0a)\n\nbye'],
     ['agentMessage', 'commentary', 'Ran `/program x`'],
   ]);
+});
+
+test('an Agent runs while its latest input is queued or running', () => {
+  const agent = (id, inputs) => ({ type: 'custom', customType: 'pi-agents-agent', data: { id, name: id, ...(inputs && { inputs }) } });
+  const input = (agentId, id, state) => ({ type: 'custom', customType: 'pi-agents-input', data: { agentId, id, state } });
+  assert.deepEqual([...runningAgents([
+    // Older Sessions record every input with the Agent.
+    agent('old', [{ id: 'i1', state: 'completed' }, { id: 'i2', state: 'running' }]),
+    agent('done'), input('done', 'i1', 'running'), input('done', 'i1', 'completed'),
+    agent('busy'), input('busy', 'i1', 'completed'), input('busy', 'i2', 'queued'),
+    input('unknown', 'i1', 'running'),
+  ])], ['old', 'busy']);
 });
 
 test('a notice that starts a turn in an idle Pi is shown live and matches its history', { timeout: 60000 }, async t => {

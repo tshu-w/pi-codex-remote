@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { commandOutputDelta, noticeItems, toolItem, updateToolItem } from '../items.mjs';
 import { seconds, invalid, applyEffort, workspaceSettings, executionSettings, providerSettings, modelIdentity, inputPrompt, agentItem, textPhase } from '../codex.mjs';
 import { turnView } from '../pages.mjs';
-import { sessionAgents } from '../history.mjs';
+import { runningAgents, sessionAgents } from '../history.mjs';
 
 export const turnsHandlers = {
   async 'turn/start'(params, emit) { return { turn: await this.startTurn(params, emit) }; },
@@ -147,6 +147,21 @@ export const turnsMethods = {
 
   rememberAgents(rpc, entries) {
     rpc.agents = [...new Map([...rpc.agents ?? [], ...sessionAgents(entries)].map(agent => [agent.id, agent])).values()];
+    this.setRunningAgents(rpc.id, runningAgents(entries));
+  },
+
+  // An owned Agent's thread is active while an input to it is queued or running and its owner's Pi is connected.
+  setRunningAgents(ownerId, running) {
+    const previous = this.runningAgents.get(ownerId) ?? new Set();
+    this.runningAgents.set(ownerId, running);
+    for (const threadId of new Set([...previous, ...running])) {
+      if (previous.has(threadId) !== running.has(threadId)) this.notify(null, 'thread/status/changed', { threadId, status: this.threadStatus(threadId) });
+    }
+  },
+
+  threadStatus(threadId) {
+    if (this.active.has(threadId) || [...this.runningAgents].some(([owner, running]) => running.has(threadId) && this.loaded.has(owner))) return { type: 'active', activeFlags: [] };
+    return { type: this.loaded.has(threadId) ? 'idle' : 'notLoaded' };
   },
 
   reconcileEntries(active, entries) {
@@ -338,7 +353,14 @@ export const turnsMethods = {
       if (active) this.notify(rpc.id, 'error', { threadId: rpc.id, turnId: active.turn.id, willRetry: false, error: { message: `Pi dialog cancelled: ${event.title ?? event.method}. Remote dialog approvals are not supported.`, codexErrorInfo: null, additionalDetails: null } });
       return;
     }
-    if (event.type === 'process_exit') this.loaded.delete(rpc.id);
+    if (event.type === 'process_exit') {
+      this.loaded.delete(rpc.id);
+      this.setRunningAgents(rpc.id, new Set());
+    }
+    // Inputs to owned Agents start with their spawn or send and end with their result.
+    if ((event.type === 'tool_execution_end' && event.toolName === 'agent') || (event.type === 'message_end' && event.message.customType === 'pi-agents')) {
+      void rpc.request('get_entries').then(({ entries }) => { if (this.loaded.get(rpc.id) === rpc) this.rememberAgents(rpc, entries); }, () => {});
+    }
     if (event.type === 'request_failed') {
       if (active) this.reconcileTurn(active);
       return;
