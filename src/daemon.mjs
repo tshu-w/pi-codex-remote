@@ -1,7 +1,7 @@
 import { createServer, createConnection } from 'node:net';
 import { accessSync, constants, realpathSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { open, readFile, mkdir, unlink, chmod } from 'node:fs/promises';
+import { open, readFile, mkdir, unlink, chmod, rename, stat } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, normalize, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHmac, randomBytes } from 'node:crypto';
@@ -93,6 +93,8 @@ export function createInputTrace({ enabled = false, home = process.env.HOME, sta
   };
 }
 
+const MAX_LOG = 10 * 1024 * 1024;
+
 export function paths() {
   const { state } = remotePaths();
   return { state, socket: join(state, 'control.sock'), lock: join(state, 'daemon.lock'), log: join(state, 'daemon.log') };
@@ -124,6 +126,7 @@ export async function start() {
   try { return await control('status', p); }
   catch (error) { if (!['ENOENT', 'ECONNREFUSED'].includes(error.code)) throw error; }
   await mkdir(p.state, { recursive: true, mode: 0o700 });
+  if ((await stat(p.log).catch(() => undefined))?.size > MAX_LOG) await rename(p.log, `${p.log}.1`).catch(error => { if (error.code !== 'ENOENT') throw error; });
   const log = await open(p.log, 'a', 0o600);
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--daemon'], {
     cwd: process.env.HOME, env: process.env, detached: true, stdio: ['ignore', log.fd, log.fd],

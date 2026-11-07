@@ -11,6 +11,7 @@ import { protocolMethods } from './schema.mjs';
 const BASE = 'https://chatgpt.com/backend-api/wham/remote/control/';
 const MAX_MESSAGE = 100 * 1024 * 1024;
 const CHUNK_SIZE = 100 * 1024;
+const MAX_CLOSED_STREAMS = 256;
 
 export function remotePaths(env = process.env) {
   const config = env.XDG_CONFIG_HOME || join(homedir(), '.config');
@@ -61,6 +62,8 @@ export class Remote {
     for (const [key, seq] of this.incoming) if (!this.received.has(key)) this.received.set(key, new Set(Array.from({ length: Math.min(seq + 1, 1024) }, (_, index) => seq - index)));
     this.sequences = new Map(Object.entries(this.state.sequences || {}));
     this.closedStreams = new Set(this.state.closedStreams || []);
+    this.pruneClosedStreams();
+    this.saveDeliveryState();
     this.cursor = this.state.cursor;
     await this.persist();
   }
@@ -360,8 +363,19 @@ export class Remote {
     this.state.closedStreams = [...this.closedStreams];
   }
 
+  // Closed streams keep their sequence so late pings and replays stay ordered; forget the oldest beyond the cap.
+  pruneClosedStreams() {
+    for (const key of this.closedStreams) {
+      if (this.closedStreams.size <= MAX_CLOSED_STREAMS) break;
+      this.closedStreams.delete(key);
+      this.sequences.delete(key);
+    }
+  }
+
   closeClient(key) {
+    this.closedStreams.delete(key);
     this.closedStreams.add(key);
+    this.pruneClosedStreams();
     const client = this.clients.get(key);
     if (client) { client.closed = true; this.disconnect(client.emit); this.clients.delete(key); }
     this.incoming.delete(key);

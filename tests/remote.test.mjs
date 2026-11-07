@@ -141,3 +141,15 @@ test('cached chunk sizes follow partial and duplicate ACKs and reconnect replay'
   await instance.emit('client', 'stream', { id: 2, result: 'ok' });
   assert.equal(instance.pending.size, 1);
 });
+
+test('closed stream state keeps only the most recent streams', async t => {
+  const instance = remote(t);
+  for (let index = 0; index < 300; index++) {
+    await instance.emit('client', `stream-${index}`, { id: index });
+    await instance.receive({ type: 'client_closed', client_id: 'client', stream_id: `stream-${index}` });
+  }
+  assert.equal(instance.closedStreams.size, 256);
+  assert.equal(instance.sequences.size, 256);
+  assert.equal(instance.closedStreams.has('client\0stream-43'), false);
+  assert.equal(instance.sequences.get('client\0stream-299'), 1);
+});
