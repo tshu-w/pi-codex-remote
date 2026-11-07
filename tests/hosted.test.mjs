@@ -49,7 +49,7 @@ class HostedRpc {
   async close() { this.closed = true; }
 }
 
-async function setup(t, { releaseDelayMs = 60_000, running } = {}) {
+async function setup(t, { releaseDelayMs = 60_000, running, children = 0 } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'codex-remote-hosted-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const id = '01a1a514-0000-7000-8000-000000000001';
@@ -62,6 +62,9 @@ async function setup(t, { releaseDelayMs = 60_000, running } = {}) {
   }
   const stateDir = join(root, 'state');
   const record = { id, path, cwd: root, created: new Date(), modified: new Date(), firstMessage: '', isSubAgent: false };
+  // Agents the session started, the first least recently active.
+  const agents = Array.from({ length: children }, (_, index) => ({ id: `01a1a516-0000-7000-8000-${String(index).padStart(12, '0')}`, path: join(root, `child-${index}.jsonl`), cwd: root,
+    created: new Date(index * 1000), modified: new Date(index * 1000), firstMessage: '', name: `agent-${index}`, isSubAgent: true, agentOwnerId: id }));
   const trash = {
     open: false, moved: [],
     async assertSessionNotOpen() { if (trash.open) throw new Error('Session is open in Pi'); },
@@ -70,7 +73,7 @@ async function setup(t, { releaseDelayMs = 60_000, running } = {}) {
   };
   const protocol = new Protocol({
     sessions: { hosted: { command: 'pi-agents' }, persistedPaths: new Map([[path, rpc]]), open: async () => rpc, close: async () => {} },
-    history: { listSessions: async () => [structuredClone(record)], readHistory: async () => ({ header: { type: 'session', version: 3, id }, entries: structuredClone(rpc.entries) }), readSearchText: async () => '', projectTurns },
+    history: { listSessions: async () => structuredClone([record, ...agents]), readHistory: async file => file === path ? { header: { type: 'session', version: 3, id }, entries: structuredClone(rpc.entries) } : { header: { type: 'session', version: 3, id: agents.find(agent => agent.path === file).id }, entries: [] }, readSearchText: async () => '', projectTurns },
     cwd: root, stateDir, trash, releaseDelayMs,
   });
   t.after(() => protocol.close());
@@ -79,7 +82,7 @@ async function setup(t, { releaseDelayMs = 60_000, running } = {}) {
   const client = phone(protocol);
   await protocol.rpc(id);
   await client.request('thread/read', { threadId: id });
-  return { protocol, rpc, trash, client, id };
+  return { protocol, rpc, trash, client, id, agents };
 }
 
 test('a turn started in the terminal is shown live and matches its history', async t => {
@@ -154,6 +157,27 @@ test('an owned Agent thread is active from its input until its result, while its
   await client.request('thread/turns/list', { threadId: id });
   rpc.emit({ type: 'process_exit' });
   assert.deepEqual(status(), ['active', 'notLoaded', 'active', 'notLoaded']);
+});
+
+test('a thread lists its running Agents and the 20 last active, and opens any other by ID', async t => {
+  const { rpc, client, id, agents } = await setup(t, { children: 25 });
+  rpc.entries.push({ type: 'custom', id: 'e0', parentId: null, timestamp: new Date().toISOString(), customType: 'pi-agents-agent', data: { id: agents[0].id, name: 'agent-0', inputs: [{ id: 'i1', state: 'running' }] } });
+  await client.request('thread/turns/list', { threadId: id });
+  const listed = (await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 200, sortKey: 'created_at' })).data;
+  assert.deepEqual(listed.map(thread => thread.id), [...agents.slice(5).reverse(), agents[0]].map(agent => agent.id));
+  assert.equal(listed.at(-1).status.type, 'active');
+  // A page's cursor continues the list after another Agent becomes the 20th last active.
+  const first = await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 2, sortKey: 'created_at', sortDirection: 'asc' });
+  assert.deepEqual(first.data.map(thread => thread.id), [agents[0].id, agents[5].id]);
+  agents[5].modified = new Date(0);
+  agents[1].modified = new Date(100_000);
+  const next = await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 1, sortKey: 'created_at', sortDirection: 'asc', cursor: first.nextCursor });
+  assert.deepEqual(next.data.map(thread => thread.id), [agents[6].id]);
+  // A card in the owner's history still opens an Agent the list leaves out.
+  const hidden = agents[2].id;
+  assert.equal((await client.request('thread/read', { threadId: hidden, includeTurns: true })).thread.id, hidden);
+  assert.deepEqual((await client.request('thread/turns/list', { threadId: hidden })).data, []);
+  assert.equal((await client.request('thread/resume', { threadId: hidden })).thread.id, hidden);
 });
 
 test('Remote steers and interrupts a terminal turn without clearing Pi\'s queue', async t => {

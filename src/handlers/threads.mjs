@@ -38,7 +38,7 @@ export const threadsHandlers = {
     const records = [...this.catalog.values()].filter(record => Boolean(this.meta.archives[record.id]) === Boolean(params.archived) && (!cwds || cwds.has(record.cwd)) && (!params.searchTerm || `${record.name ?? ''} ${record.firstMessage ?? ''}`.toLowerCase().includes(params.searchTerm.toLowerCase())));
     if (params.parentThreadId && params.ancestorThreadId) throw invalid('parentThreadId and ancestorThreadId cannot be combined.');
     if (params.sortKey != null && !['created_at', 'updated_at', 'recency_at'].includes(params.sortKey)) throw invalid(`Unsupported sortKey ${JSON.stringify(typeof params.sortKey === 'string' ? params.sortKey.slice(0, 64) : typeof params.sortKey)}; use created_at, updated_at, or recency_at.`);
-    const filtered = records.filter(record => {
+    let filtered = records.filter(record => {
       if (params.modelProviders?.length && !params.modelProviders.includes('custom')) return false;
       if (params.sourceKinds?.length) {
         const sourceKind = record.isSubAgent ? (this.threadSource(record).subAgent.thread_spawn ? 'subAgentThreadSpawn' : 'subAgentOther') : 'unknown';
@@ -61,6 +61,13 @@ export const threadsHandlers = {
       }
       return true;
     });
+    // A thread's Agents list their running ones and the 20 last active; the app reads each it lists, and others open by ID.
+    if (params.parentThreadId || params.ancestorThreadId) {
+      const idle = new Set(filtered.filter(record => this.threadStatus(record.id).type !== 'active').sort((a, b) => new Date(b.modified) - new Date(a.modified)).slice(20));
+      // A page's anchor stays listed, so its cursor still continues the list.
+      const anchor = typeof params.cursor === 'string' ? params.cursor.replace(/^(after|at):/, '') : null;
+      filtered = filtered.filter(record => !idle.has(record) || record.id === anchor);
+    }
     const key = ['updated_at', 'recency_at'].includes(params.sortKey) ? 'modified' : 'created';
     filtered.sort((a, b) => new Date(b[key]) - new Date(a[key]) || a.id.localeCompare(b.id));
     if (params.sortDirection === 'asc') filtered.reverse();
