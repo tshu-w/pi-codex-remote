@@ -198,20 +198,6 @@ test('pages of a history reuse its entries until Pi reports a change', async t =
   assert.deepEqual(await list(), ['u1', 'u2']);
 });
 
-test('turns without items come in one page, as the app reads all of a parent to open its Agent', async t => {
-  const { rpc, client, id } = await setup(t);
-  for (let index = 0; index < 5; index++) {
-    rpc.entries.push({ type: 'message', id: `u${index}`, parentId: rpc.entries.at(-1)?.id ?? null, timestamp: new Date().toISOString(), message: { role: 'user', content: 'ask', timestamp: Date.now() } });
-    rpc.entries.push({ type: 'message', id: `a${index}`, parentId: `u${index}`, timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stopReason: 'stop', timestamp: Date.now() } });
-  }
-  const page = params => client.request('thread/turns/list', { threadId: id, sortDirection: 'asc', limit: 2, ...params });
-  const first = await page({ itemsView: 'notLoaded' });
-  assert.deepEqual([first.data.map(turn => turn.id), first.nextCursor], [['u0', 'u1', 'u2', 'u3', 'u4'], null]);
-  const summary = await page({ itemsView: 'summary' });
-  assert.deepEqual(summary.data.map(turn => turn.id), ['u0', 'u1']);
-  assert.deepEqual((await page({ itemsView: 'notLoaded', cursor: summary.nextCursor })).data.map(turn => turn.id), ['u2', 'u3', 'u4']);
-});
-
 test('Remote steers and interrupts a terminal turn without clearing Pi\'s queue', async t => {
   const { rpc, client, id } = await setup(t);
   rpc.emit({ type: 'agent_start' });

@@ -15,8 +15,7 @@ export function offsetPage(values, params, fallback = 50) {
 export function historyCursor(id, inclusive, context) {
   return context ? 'pi:' + Buffer.from(JSON.stringify([context.threadId, context.scope, id, inclusive])).toString('base64url') : `${inclusive ? 'at' : 'after'}:${id}`;
 }
-// `all` returns every value after the cursor in one page.
-export function historyPage(values, params, getId, context, filter = () => true, { all = false } = {}) {
+export function historyPage(values, params, getId, context, filter = () => true) {
   if (params.sortDirection != null && !['asc', 'desc'].includes(params.sortDirection)) throw invalid('sortDirection must be asc or desc.');
   let start = 0;
   if (params.cursor != null) {
@@ -44,7 +43,7 @@ export function historyPage(values, params, getId, context, filter = () => true,
   for (let index = start; index < values.length; index++) {
     const value = values[index];
     if (!filter(value)) continue;
-    if (!all && data.length === limit) { hasMore = true; break; }
+    if (data.length === limit) { hasMore = true; break; }
     data.push(value);
   }
   return { data, nextCursor: hasMore ? historyCursor(getId(data.at(-1)), false, context) : null, backwardsCursor: data.length ? historyCursor(getId(data[0]), true, context) : null };

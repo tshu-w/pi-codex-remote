@@ -169,8 +169,7 @@ export const threadsHandlers = {
     await this.thread(params.threadId);
     const turns = await this.turns(params.threadId);
     if (params.sortDirection !== 'asc') turns.reverse();
-    // Turns without items are small; the app reads all of a parent's to find an Agent's spawn, a page per round trip.
-    const page = historyPage(turns, params, turn => turn.id, this.historyContext(params.threadId, 'turns'), undefined, { all: params.itemsView === 'notLoaded' });
+    const page = historyPage(turns, params, turn => turn.id, this.historyContext(params.threadId, 'turns'));
     page.data = page.data.map(turn => turnView(turn, params.itemsView ?? 'summary'));
     return page;
   },
