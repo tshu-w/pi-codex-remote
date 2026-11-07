@@ -1,7 +1,7 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { toolItem, updateToolItem } from './items.mjs';
+import { noticeItems, toolItem, updateToolItem } from './items.mjs';
 import { agentItem, textPhase } from './codex.mjs';
 
 // Budgets account for retained payloads; entry limits also bound Map/object overhead.
@@ -209,18 +209,26 @@ function userContent(content, imageMapper) {
     : { type: 'text', text: hasImage ? imageAttachmentText(block.text) : block.text, text_elements: [] });
 }
 
+// Agents a session started, which its notices name by a short ID.
+export const sessionAgents = entries => entries.flatMap(entry => entry.type === 'custom' && entry.customType === 'pi-agents-agent' && typeof entry.data?.id === 'string' ? [{ id: entry.data.id, name: entry.data.name }] : []);
+
 export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = {}, cwd = '', senderThreadId, imageMapper = block => ({ type: 'image', url: `data:${block.mimeType};base64,${block.data}` }) } = {}) {
   const turns = [];
   let turn;
   const tools = new Map();
   const inputs = new Map();
   let unphased = [];
+  // A turn has ended once Pi's run stops; until then steered input joins it.
+  let ended = false;
+  // Notices that open a turn stay together until Pi replies; a prompt after them starts its own turn.
+  let notices = false;
   // Unsigned assistant text is commentary unless it is the turn's last reply.
   const settle = () => {
     unphased.forEach(({ item, toolUse }, index) => { item.phase = toolUse || index < unphased.length - 1 ? 'commentary' : 'final_answer'; });
     unphased = [];
   };
   const branch = activeBranch(entries, leafId);
+  const agents = sessionAgents(branch);
   const nestedItems = new Map(branch.filter(entry => entry.type === 'custom' && entry.customType === 'codex-remote-tool')
     .map(entry => [entry.data.item.id, entry.data]));
   for (const entry of branch) {
@@ -240,13 +248,19 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
     const role = message?.role;
     if (role === 'system') continue;
     const visibleCustom = entry.type === 'custom_message' && entry.display;
+    const notice = visibleCustom || (role === 'custom' && message.display !== false);
     if (!message && !visibleCustom && entry.type !== 'compaction' && entry.type !== 'branch_summary') continue;
     const compactionMapping = entry.type === 'compaction' ? entryMappings[entry.id] : undefined;
     const separateCompaction = compactionMapping?.turnId && (compactionMapping.compactionTurn || compactionMapping.turnId !== (entryMappings[turn?.id]?.turnId ?? turn?.id));
     // Unmapped or idle shell commands start a turn; one run during a turn is mapped without a turnId.
     const shellTurn = role === 'bashExecution' && !(entryMappings[entry.id] && !entryMappings[entry.id].turnId);
-    if (role === 'user' || shellTurn || !turn || separateCompaction) {
+    // Input Remote saw start another turn opens it even after a run Pi never finished.
+    const mappedTurn = (role === 'user' || notice) && entryMappings[entry.id]?.turnId;
+    const otherTurn = mappedTurn && mappedTurn !== (entryMappings[turn?.id]?.turnId ?? turn?.id);
+    if ((role === 'user' && (ended || notices)) || (notice && ended) || otherTurn || shellTurn || !turn || separateCompaction) {
       settle();
+      ended = role !== 'user' && !notice;
+      notices = notice;
       if (turn?.items.length) turns.push(turn);
       tools.clear();
       turn = {
@@ -278,6 +292,8 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
       } else if (message.stopReason === 'aborted') turn.status = 'interrupted';
       else if (message.stopReason === 'toolUse' || message.stopReason === 'pending') turn.status = 'inProgress';
       else { turn.status = 'completed'; turn.error = null; }
+      ended = !['toolUse', 'pending'].includes(message.stopReason);
+      notices = false;
     } else if (role === 'toolResult') {
       let item = tools.get(message.toolCallId);
       if (!item) {
@@ -305,8 +321,7 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
         durationMs: null, exitCode: message.exitCode ?? null, pluginId: null, processId: null,
         scriptPath: null, source: 'userShell', status: message.cancelled || message.exitCode !== 0 ? 'failed' : 'completed',
       });
-    } else if (visibleCustom) turn.items.push(agentItem(entry.id, textContent(entry.content)));
-    else if (role === 'custom' && message.display !== false) turn.items.push(agentItem(entry.id, textContent(message.content)));
+    } else if (notice) turn.items.push(...noticeItems(entry.id, visibleCustom ? entry : message, { cwd, agents }));
     else if (entry.type === 'compaction') turn.items.push({ type: 'contextCompaction', id: entry.id });
     else if (entry.type === 'branch_summary') turn.items.push(agentItem(entry.id, entry.summary));
     turn.completedAt = Math.floor(Date.parse(entry.timestamp) / 1000);

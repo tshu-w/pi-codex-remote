@@ -245,6 +245,8 @@ export class Protocol {
   async turns(threadId) {
     const rpc = this.loaded.get(threadId);
     const { entries, leafId } = await this.entries(threadId);
+    // Live notices name the Agents the history shows.
+    if (rpc) this.rememberAgents(rpc, entries);
     const running = this.active.get(threadId);
     if (running && this.reconcileEntries(running, entries)) await this.saveMetadata();
     for (const compaction of running?.compactionMappings ?? []) {

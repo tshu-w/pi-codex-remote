@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { commandOutputDelta, toolItem, updateToolItem } from '../items.mjs';
+import { commandOutputDelta, noticeItems, toolItem, updateToolItem } from '../items.mjs';
 import { seconds, invalid, applyEffort, workspaceSettings, executionSettings, providerSettings, modelIdentity, inputPrompt, agentItem, textPhase } from '../codex.mjs';
 import { turnView } from '../pages.mjs';
+import { sessionAgents } from '../history.mjs';
 
 export const turnsHandlers = {
   async 'turn/start'(params, emit) { return { turn: await this.startTurn(params, emit) }; },
@@ -120,6 +121,7 @@ export const turnsMethods = {
     this.active.set(params.threadId, active);
     try {
       const { entries } = await rpc.request('get_entries');
+      this.rememberAgents(rpc, entries);
       active.priorEntries = new Set(entries.map(entry => entry.id));
       this.notify(rpc.id, 'thread/status/changed', { threadId: rpc.id, status: { type: 'active', activeFlags: [] } });
       this.notify(rpc.id, 'turn/started', { threadId: rpc.id, turn: { ...active.turn, items: [], itemsView: 'notLoaded' } });
@@ -143,6 +145,10 @@ export const turnsMethods = {
     }
   },
 
+  rememberAgents(rpc, entries) {
+    rpc.agents = [...new Map([...rpc.agents ?? [], ...sessionAgents(entries)].map(agent => [agent.id, agent])).values()];
+  },
+
   reconcileEntries(active, entries) {
     if (!active.priorEntries) return false;
     let changed = false;
@@ -154,8 +160,16 @@ export const turnsMethods = {
     let userIndex = 0;
     let messageIndex = 0;
     let shellIndex = 0;
+    let noticeIndex = 0;
     for (const entry of entries) {
-      if (active.priorEntries.has(entry.id) || entry.type !== 'message') continue;
+      if (active.priorEntries.has(entry.id)) continue;
+      if (entry.type === 'custom_message' && entry.display) {
+        const notice = active.notices?.[noticeIndex++];
+        // A notice that opens a turn in history belongs to the turn that showed it.
+        if (notice) map(entry.id, { itemId: notice.id, turnId: active.turn.id });
+        for (const id of notice?.ids ?? []) if (id !== notice.id) map(entry.id + id.slice(notice.id.length), { itemId: id });
+      }
+      if (entry.type !== 'message') continue;
       if (entry.message.role === 'user') {
         const user = active.users[userIndex] ??= { clientId: null };
         userIndex++;
@@ -218,6 +232,7 @@ export const turnsMethods = {
     const started = rpc.messageEnds;
     // Messages this turn ended before the snapshot are already in it; they are the last ones written.
     active.inputs = rpc.request('get_entries').then(snapshot => {
+      this.rememberAgents(rpc, snapshot.entries);
       const written = rpc.messageEndsAt.get(snapshot) - started;
       const messages = snapshot.entries.filter(entry => ['message', 'custom_message'].includes(entry.type));
       const own = new Set(messages.slice(messages.length - written).map(entry => entry.id));
@@ -230,6 +245,7 @@ export const turnsMethods = {
   async joinExternalTurn(rpc) {
     if (!this.sessions.hosted || !rpc.state.isStreaming || this.active.has(rpc.id)) return;
     const { entries, leafId } = await rpc.request('get_entries');
+    this.rememberAgents(rpc, entries);
     // Events before the snapshot had no turn to join; history shows them.
     if (!rpc.state.isStreaming || this.active.has(rpc.id)) return;
     const native = this.history.projectTurns(entries, { leafId }).at(-1);
@@ -245,6 +261,7 @@ export const turnsMethods = {
       }
       // Assistant messages already written keep their history item IDs.
       if (entry.message?.role === 'assistant') active.messages.push(new Map());
+      if (entry.type === 'custom_message' && entry.display) (active.notices ??= []).push({ id: mapping?.itemId ?? entry.id });
     }
     active.observedUsers = active.users.length;
     active.messageIndex = active.messages.length - 1;
@@ -326,7 +343,8 @@ export const turnsMethods = {
       if (active) this.reconcileTurn(active);
       return;
     }
-    if (event.type === 'agent_start' && !active && this.sessions.hosted) {
+    // Another client of a host, or an extension such as a notification, started this run.
+    if (event.type === 'agent_start' && !active) {
       this.startExternalTurn(rpc);
       return;
     }
@@ -380,6 +398,19 @@ export const turnsMethods = {
       const item = this.history.projectTurns([{ type: 'message', id: user.itemId, timestamp: new Date().toISOString(), message: event.message }], { senderThreadId: rpc.id })[0].items[0];
       item.clientId = user.clientId;
       this.completeItem(active, this.startItem(active, item));
+    } else if (event.type === 'message_end' && event.message.role === 'custom' && event.message.display) {
+      // Entries record each Agent a session starts; Remote knows those it has read or seen start.
+      // IDs are fixed on arrival, so history read before the items are shown maps to them: a result has at most two items.
+      const id = randomUUID();
+      const notice = { id, ids: [id, ...Array.from({ length: 2 * (event.message.details?.results?.length ?? 0) - 1 }, (_, index) => `${id}:${index + 1}`)] };
+      (active.notices ??= []).push(notice);
+      const show = () => {
+        const items = noticeItems(id, event.message, { cwd: rpc.cwd, agents: rpc.agents });
+        for (const item of items) this.completeItem(active, this.startItem(active, item));
+      };
+      // An Agent Remote does not know yet is in the entries, so live shows what history will.
+      if (noticeItems('', event.message, { agents: rpc.agents })[0].type !== 'agentMessage' || !event.message.details?.results?.length) show();
+      else active.inputs = active.inputs.then(() => rpc.request('get_entries')).then(({ entries }) => this.rememberAgents(rpc, entries), () => {}).then(show);
     } else if (event.type === 'message_update') {
       const update = event.assistantMessageEvent;
       const thinking = update.type.startsWith('thinking_');
@@ -428,6 +459,8 @@ export const turnsMethods = {
       } else if (event.type === 'tool_execution_end') {
         const item = active.tools.get(event.toolCallId);
         if (!item) return;
+        const spawned = event.toolName === 'agent' && item.arguments?.action === 'spawn' && !event.isError && event.result?.details;
+        if (typeof spawned?.id === 'string') (rpc.agents ??= []).push({ id: spawned.id, name: spawned.name });
         item.status = event.isError ? 'failed' : 'completed';
         if (!['fileChange', 'collabAgentToolCall'].includes(item.type)) item.durationMs = event.durationMs ?? Date.now() - (active.toolStartedAt?.get(item.id) ?? Date.now());
         if (item.type === 'dynamicToolCall') item.success = !event.isError;
@@ -456,6 +489,7 @@ export const turnsMethods = {
         const delta = commandOutputDelta(previousOutput, item.aggregatedOutput);
         if (delta) this.notify(rpc.id, 'item/commandExecution/outputDelta', { threadId: rpc.id, turnId: active.turn.id, itemId: item.id, delta });
       }
+      if (complete && item.tool === 'spawnAgent') (rpc.agents ??= []).push({ id: item.receiverThreadIds[0], name: event.result.details.name });
       if (complete) {
         active.toolStartedAt?.delete(item.id);
         active.toolInputs?.delete(item.id);

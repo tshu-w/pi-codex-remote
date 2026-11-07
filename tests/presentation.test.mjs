@@ -129,8 +129,10 @@ test('phone tool cards and message phases retain their contents after reopening 
     assert.equal(started[0].params.item.tool, card.tool);
     assert.equal(started[0].params.item.senderThreadId, card.senderThreadId);
     assert.deepEqual(started[0].params.item.receiverThreadIds, card.receiverThreadIds);
-    assert.deepEqual(started[0].params.item.agentsStates, card.tool === 'listAgents' ? listed : {});
-    assert.deepEqual(card.agentsStates, card.tool === 'listAgents' ? listed : {});
+    // A started Agent runs until its result arrives.
+    const states = card.tool === 'listAgents' ? listed : card.tool === 'spawnAgent' ? { [card.receiverThreadIds[0]]: { status: 'running', message: null } } : {};
+    assert.deepEqual(started[0].params.item.agentsStates, states);
+    assert.deepEqual(card.agentsStates, states);
     assert.equal(started[0].params.item.status, card.status);
     assert.equal(card.status, 'completed');
   }

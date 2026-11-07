@@ -102,6 +102,41 @@ test('a turn started in the terminal is shown live and matches its history', asy
   assert.deepEqual(history.items.map(item => item.id), live.map(item => item.id));
 });
 
+test('an Agent result that starts a host turn after an answer shows the Agent completion live and in history', async t => {
+  // Whether or not Remote read the Agent's record before its result arrives.
+  for (const read of [true, false]) {
+    const { rpc, client, id } = await setup(t);
+    const worker = '01a1a515-0000-7000-8000-000000000002';
+    rpc.entries.push(
+      { type: 'custom', id: 's0', parentId: null, timestamp: new Date().toISOString(), customType: 'pi-agents-agent', data: { id: worker, name: 'worker' } },
+      { type: 'message', id: 'u0', parentId: 's0', timestamp: new Date().toISOString(), message: { role: 'user', content: 'earlier', timestamp: Date.now() } },
+      { type: 'message', id: 'a0', parentId: 'u0', timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'answered' }], stopReason: 'stop', timestamp: Date.now() } },
+    );
+    if (read) await client.request('thread/turns/list', { threadId: id });
+    rpc.emit({ type: 'agent_start' });
+    const { params: { turn } } = await client.notification('turn/started');
+    const message = { role: 'custom', customType: 'pi-agents', content: '<agent-result name="worker" id="01a1a515" status="completed">\ndone\n</agent-result>', display: true, timestamp: Date.now(),
+      details: { delivery: 'steer', results: [{ name: 'worker', id: '01a1a515', status: 'completed', body: 'done' }] } };
+    rpc.emit({ type: 'message_end', message });
+    rpc.entries.push({ type: 'custom_message', id: 'n1', parentId: 'a0', timestamp: new Date().toISOString(), customType: message.customType, content: message.content, display: true, details: message.details });
+    rpc.emit({ type: 'message_start', message: { role: 'assistant', content: [] } });
+    await tick();
+    rpc.message('a1', { role: 'assistant', content: [{ type: 'text', text: 'reported' }], stopReason: 'stop', timestamp: Date.now() });
+    rpc.emit({ type: 'agent_settled' });
+    await client.notification('turn/completed');
+    const live = client.records.filter(record => record.method === 'item/completed').map(record => record.params.item);
+    // Unread, the result is shown once Remote has read the Agent's record, after the reply's first events.
+    const byType = Object.fromEntries(live.map(item => [item.type, item]));
+    assert.deepEqual(live.map(item => item.type).sort(), ['agentMessage', 'dynamicToolCall', 'subAgentActivity']);
+    assert.deepEqual([byType.subAgentActivity.kind, byType.subAgentActivity.agentThreadId, byType.dynamicToolCall.contentItems, byType.agentMessage.phase], ['completed', worker, [{ type: 'inputText', text: 'done' }], 'final_answer']);
+    const history = (await client.request('thread/turns/list', { threadId: id, itemsView: 'full' })).data;
+    const shown = history.find(value => value.id === turn.id);
+    assert.equal(history.length, 2);
+    if (read) assert.deepEqual(shown.items.map(item => item.id), live.map(item => item.id));
+    else assert.deepEqual(shown.items.map(item => item.id).sort(), live.map(item => item.id).sort());
+  }
+});
+
 test('Remote steers and interrupts a terminal turn without clearing Pi\'s queue', async t => {
   const { rpc, client, id } = await setup(t);
   rpc.emit({ type: 'agent_start' });

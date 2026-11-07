@@ -9,6 +9,11 @@ const text = content => typeof content === 'string' ? content : content.filter(b
 export default function (pi) {
   let release;
   pi.registerCommand('fixture-release', { description: 'Release a held reply', handler: async () => release?.() });
+  // Like pi-exec, a background command's result that starts a turn.
+  pi.registerCommand('fixture-notify', { description: 'Deliver a bash result', handler: async command => pi.sendMessage({
+    customType: 'bash-result', display: true, details: { pgid: 1, command, status: 'completed', seconds: 1.5 },
+    content: `<bash-result pgid="1" status="completed">\nCommand: ${command}\nWall time 1.5 seconds\nOutput:\n\nok\n\n</bash-result>`,
+  }, { triggerTurn: true }) });
   // Children outlive this Pi process, which Remote releases after each turn.
   const childrenFile = process.env.FIXTURE_CALLS + '.children.json';
   const children = new Map(existsSync(childrenFile) ? JSON.parse(readFileSync(childrenFile, 'utf8')) : []);

@@ -78,6 +78,8 @@ function collabToolItem(id, name, args, result, senderThreadId) {
       labelMatches(text.slice(6, -9), details.id, details.name)) {
     receiverThreadIds = [details.id];
     tool = 'spawnAgent';
+    // A started Agent runs until its result arrives.
+    agentsStates = { [details.id]: { status: 'running', message: null } };
   } else if (args?.action === 'send' && args.deliverAs === 'write' && knownKeys(['ids']) &&
       Array.isArray(details.ids) && details.ids.length && details.ids.every(validId) &&
       text.startsWith('Write accepted by ') && text.endsWith('.')) {
@@ -160,6 +162,62 @@ export function updateToolItem(item, result, { complete = false, isError = false
     item.status = isError ? 'failed' : 'completed';
     if (!['fileChange', 'collabAgentToolCall'].includes(item.type)) item.durationMs = durationMs ?? null;
   }
+}
+
+// Extension notices such as pi-exec's `<bash-result>` and pi-agents' `<agent-result>` are tagged text for
+// the model; as Markdown their tags render as HTML blocks, so they read as a header and their body.
+export function noticeText({ customType, content, details }) {
+  const text = typeof content === 'string' ? content : (content ?? []).filter(block => block.type === 'text').map(block => block.text).join('\n');
+  const fenced = (value, language = '') => {
+    const fence = '`'.repeat(Math.max(3, ...[...value.matchAll(/`+/g)].map(([run]) => run.length + 1)));
+    return `${fence}${language}\n${value}\n${fence}`;
+  };
+  if (customType === 'bash-result' && typeof details?.command === 'string') {
+    const output = (/\nOutput:\n\n([\s\S]*)\n<\/bash-result>$/.exec(text)?.[1] ?? text).replace(/\n+$/, '');
+    const seconds = Number.isFinite(details.seconds) ? ` in ${details.seconds.toFixed(1)} s` : '';
+    return [`Background command ${details.status}${seconds}`, fenced(details.command, 'sh'), ...(output ? [fenced(output)] : [])].join('\n\n');
+  }
+  const element = /^<([a-z][\w-]*)((?: [\w-]+="[^"]*")*)>\n([\s\S]*?)\n<\/\1>$/gm;
+  return text.replace(element, (_, tag, attributes, body) => {
+    const { name, id, status, note, ...rest } = Object.fromEntries([...attributes.matchAll(/ ([\w-]+)="([^"]*)"/g)].map(([, key, value]) => [key, value]));
+    const agent = [name && `**${name}**`, id && `(${id})`].filter(Boolean).join(' ');
+    const header = tag === 'agent-result' ? `Agent result from ${agent}${status ? `: ${status}` : ''}`
+      : tag === 'agent-message' ? `Message from ${agent}`
+        : [`**${tag}**`, agent, status, ...Object.entries(rest).map(([key, value]) => `${key}=${value}`)].filter(Boolean).join(' ');
+    return `${header}\n\n${body}`;
+  });
+}
+
+// Notices shown as the steps they report: pi-exec's finished background command as a command, and each
+// pi-agents result as the Agent's completion with its result beside it. `agents` lists known { id, name }.
+export function noticeItems(id, message, { cwd = '', agents = [] } = {}) {
+  const { customType, details } = message;
+  if (customType === 'bash-result' && typeof details?.command === 'string') {
+    const text = typeof message.content === 'string' ? message.content : toolOutput(message);
+    const output = /\nOutput:\n\n([\s\S]*)\n<\/bash-result>$/.exec(text)?.[1] ?? text;
+    const code = details.status === 'completed' ? 0 : Number(/\n\nCommand exited with code (\d+)\n*$/.exec(output)?.[1]);
+    return [{
+      type: 'commandExecution', id, command: details.command, cwd, commandActions: [], aggregatedOutput: output,
+      durationMs: Number.isFinite(details.seconds) ? Math.round(details.seconds * 1000) : null,
+      exitCode: Number.isInteger(code) ? code : null, processId: null, pluginId: null, scriptPath: null,
+      source: 'agent', status: details.status === 'completed' ? 'completed' : 'failed',
+    }];
+  }
+  const results = customType === 'pi-agents' && Array.isArray(details?.results) ? details.results : [];
+  const resolved = results.map(result => agents.findLast(agent => typeof result.id === 'string' && agent.id.startsWith(result.id) && agent.name === result.name));
+  if (!results.length || resolved.some(agent => !agent)) return [{ type: 'agentMessage', id, text: noticeText(message), phase: 'commentary', delivery: null, memoryCitation: null }];
+  return results.flatMap((result, index) => {
+    const completed = result.status === 'completed';
+    const body = [result.body, result.notice].filter(Boolean).join('\n\n');
+    return [{
+      type: 'subAgentActivity', id: index ? `${id}:${2 * index}` : id, kind: completed ? 'completed' : 'interrupted',
+      agentThreadId: resolved[index].id, agentPath: result.name, model: null, reasoningEffort: null,
+    }, {
+      type: 'dynamicToolCall', id: `${id}:${2 * index + 1}`, tool: 'agent', namespace: null,
+      arguments: { action: 'result', target: result.name, status: result.status },
+      contentItems: [{ type: 'inputText', text: body }], durationMs: null, status: completed ? 'completed' : 'failed', success: completed,
+    }];
+  });
 }
 
 // Pi emits cumulative snapshots. A rolling/truncated snapshot is not an append delta;
