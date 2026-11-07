@@ -214,6 +214,12 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
   let turn;
   const tools = new Map();
   const inputs = new Map();
+  let unphased = [];
+  // Unsigned assistant text is commentary unless it is the turn's last reply.
+  const settle = () => {
+    unphased.forEach(({ item, toolUse }, index) => { item.phase = toolUse || index < unphased.length - 1 ? 'commentary' : 'final_answer'; });
+    unphased = [];
+  };
   const branch = activeBranch(entries, leafId);
   const nestedItems = new Map(branch.filter(entry => entry.type === 'custom' && entry.customType === 'codex-remote-tool')
     .map(entry => [entry.data.item.id, entry.data]));
@@ -240,6 +246,7 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
     // Unmapped or idle shell commands start a turn; one run during a turn is mapped without a turnId.
     const shellTurn = role === 'bashExecution' && !(entryMappings[entry.id] && !entryMappings[entry.id].turnId);
     if (role === 'user' || shellTurn || !turn || separateCompaction) {
+      settle();
       if (turn?.items.length) turns.push(turn);
       tools.clear();
       turn = {
@@ -252,7 +259,11 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
     } else if (role === 'assistant') {
       for (const [index, block] of (message.content || []).entries()) {
         const id = `${entry.id}:${index}`;
-        if (block.type === 'text') turn.items.push(agentItem(id, block.text, textPhase(block)));
+        if (block.type === 'text') {
+          const item = agentItem(id, block.text, textPhase(block));
+          if (!item.phase) unphased.push({ item, toolUse: message.stopReason === 'toolUse' });
+          turn.items.push(item);
+        }
         else if (block.type === 'thinking') turn.items.push({ type: 'reasoning', id, content: [block.thinking], summary: [] });
         else if (block.type === 'toolCall') {
           const item = toolItem(block.id, block.name, block.arguments, { cwd, namespace: block.namespace, senderThreadId });
@@ -301,6 +312,7 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
     turn.completedAt = Math.floor(Date.parse(entry.timestamp) / 1000);
     turn.durationMs = (turn.completedAt - turn.startedAt) * 1000;
   }
+  settle();
   if (turn?.items.length) turns.push(turn);
   return turns;
 }

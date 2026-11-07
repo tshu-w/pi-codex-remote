@@ -340,6 +340,7 @@ export const turnsMethods = {
       }
     } else if (event.type === 'message_end' && event.message.role === 'assistant') {
       const message = event.message;
+      const lastText = (message.content ?? []).findLastIndex(content => content.type === 'text');
       for (const [index, content] of (message.content ?? []).entries()) {
         if (content.type !== 'text' && content.type !== 'thinking') continue;
         let item = active.blocks.get(index);
@@ -348,7 +349,10 @@ export const turnsMethods = {
           item = this.startItem(active, content.type === 'text' ? agentItem(id, '', textPhase(content)) : { type: 'reasoning', id, content: [''], summary: [] });
           active.blocks.set(index, item);
         }
-        if (content.type === 'text') { item.text = content.text; item.phase = textPhase(content); }
+        if (content.type === 'text') {
+          item.text = content.text;
+          item.phase = textPhase(content) ?? (message.stopReason === 'toolUse' || index < lastText ? 'commentary' : 'final_answer');
+        }
         else item.content[0] = content.thinking;
         this.completeItem(active, item);
       }

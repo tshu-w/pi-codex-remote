@@ -71,6 +71,7 @@ export default function (pi) {
         timestamp: Date.now(), stopReason: 'pending', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
       const push = event => stream.push(structuredClone(event));
+      let unsigned = false;
       const say = async (...parts) => {
         message.content.push({ type: 'text', text: '' });
         push({ type: 'text_start', contentIndex: 0, partial: message });
@@ -79,7 +80,7 @@ export default function (pi) {
           message.content[0].text += part;
           push({ type: 'text_delta', contentIndex: 0, delta: part, partial: message });
         }
-        message.content[0].textSignature = JSON.stringify({ v: 1, id: 'fixture-answer', phase: 'final_answer' });
+        if (!unsigned) message.content[0].textSignature = JSON.stringify({ v: 1, id: 'fixture-answer', phase: 'final_answer' });
         push({ type: 'text_end', contentIndex: 0, content: message.content[0].text, partial: message });
         message.stopReason = 'stop';
       };
@@ -87,7 +88,8 @@ export default function (pi) {
         try {
           const users = context.messages.filter(value => value.role === 'user');
           const last = context.messages.findLastIndex(value => value.role === 'user');
-          const prompt = text(users.at(-1).content);
+          unsigned = text(users.at(-1).content).startsWith('unsigned ');
+          const prompt = text(users.at(-1).content).replace(/^unsigned /, '');
           const images = users.flatMap(value => typeof value.content === 'string' ? [] : value.content.filter(b => b.type === 'image'));
           appendFileSync(process.env.FIXTURE_CALLS, JSON.stringify({ prompt, images: images.map(image => image.data) }) + '\n');
           const result = context.messages.slice(last + 1).find(value => value.role === 'toolResult');
@@ -101,7 +103,7 @@ export default function (pi) {
               : tool === 'find' ? { pattern: rest[0], path: '.' }
               : ['read', 'ls'].includes(tool) ? { path: rest[0] || '.' } : {};
             const call = { type: 'toolCall', id: 'fixture-' + Date.now(), name: tool, arguments: args };
-            message.content.push({ type: 'text', text: 'Working on it.', textSignature: JSON.stringify({ v: 1, id: 'fixture-comment', phase: 'commentary' }) });
+            message.content.push({ type: 'text', text: 'Working on it.', ...(unsigned ? {} : { textSignature: JSON.stringify({ v: 1, id: 'fixture-comment', phase: 'commentary' }) }) });
             push({ type: 'text_start', contentIndex: 0, partial: message });
             push({ type: 'text_end', contentIndex: 0, content: 'Working on it.', partial: message });
             message.content.push(call);

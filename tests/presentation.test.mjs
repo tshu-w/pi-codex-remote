@@ -19,7 +19,7 @@ test('phone tool cards and message phases retain their contents after reopening 
   const phone = first.client;
   const { thread } = await phone.request('thread/start', { cwd: f.cwd, model });
   const completed = [];
-  for (const prompt of ['read input.txt', 'grep fixture-data', 'find *.txt', 'ls .', 'write output.txt', 'edit output.txt', 'write output.txt replaced', 'mcp__fixture__lookup', 'nested', 'read missing.txt']) {
+  for (const prompt of ['read input.txt', 'grep fixture-data', 'find *.txt', 'ls .', 'write output.txt', 'edit output.txt', 'write output.txt replaced', 'mcp__fixture__lookup', 'nested', 'read missing.txt', 'unsigned read input.txt']) {
     const turn = await runAndCollect(phone, thread.id, prompt);
     const texts = turn.items.filter(item => item.type === 'agentMessage');
     assert.deepEqual(texts.map(item => item.phase), ['commentary', 'final_answer'], prompt);
