@@ -1,5 +1,5 @@
 import { createServer, createConnection } from 'node:net';
-import { realpathSync } from 'node:fs';
+import { accessSync, constants, realpathSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { open, readFile, mkdir, unlink, chmod } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, normalize, relative } from 'node:path';
@@ -158,7 +158,10 @@ async function serve() {
   }
   await lock.writeFile(`${process.pid}\n`);
   await lock.close();
-  const sessions = new Sessions();
+  // `pi-agents` is pd's unambiguous name; with it, saved sessions join their hosts instead of running a private Pi.
+  const hosted = (process.env.PATH ?? '').split(':').some(dir => { try { accessSync(join(dir, 'pi-agents'), constants.X_OK); return true; } catch { return false; } });
+  console.error(`${new Date().toISOString()} sessions ${hosted ? 'pi-agents hosts' : 'pi'}`);
+  const sessions = new Sessions({ hosted: hosted ? { command: 'pi-agents' } : undefined });
   const inputTrace = createInputTrace({ enabled: process.env.PI_REMOTE_INPUT_TRACE === '1', stateDir: p.state });
   const protocol = new Protocol({ sessions, cwd: process.env.HOME, stateDir: p.state, onResponse: (request, error, result) => {
     inputTrace(request, 'response', error);

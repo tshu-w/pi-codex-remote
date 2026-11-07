@@ -122,7 +122,8 @@ export const queueMethods = {
   },
 
   queueFinished(active) {
-    this.scheduleQueue(active.rpc.id, active.interrupted || Boolean(active.error));
+    // An interrupt from Remote pauses the queue itself; a turn started elsewhere does not.
+    this.scheduleQueue(active.rpc.id, !active.external && (active.interrupted || Boolean(active.error)));
   },
 
   // Automatic dispatch shares handle()'s per-thread mutation chain.

@@ -7,7 +7,6 @@ import { ImagePreviews } from './image-previews.mjs';
 import { schemaViolation } from './schema.mjs';
 import { seconds, modelKey, invalid } from './codex.mjs';
 import { historyCursor } from './pages.mjs';
-import { releaseCommand } from './release-command.mjs';
 import { configHandlers } from './handlers/config.mjs';
 import { execHandlers } from './handlers/exec.mjs';
 import { filesHandlers } from './handlers/files.mjs';
@@ -60,7 +59,11 @@ export class Protocol {
     this.inUse = new Map();
     this.probeUsed = new Map();
     this.releases = new Map();
-    this.releaseTimer = setInterval(() => void this.releaseIdle(), Math.min(releaseDelayMs, 60_000));
+    this.releaseTimer = setInterval(() => {
+      for (const active of this.active.values()) this.reconcileTurn(active);
+      void this.releaseIdle();
+      void this.drainTrash();
+    }, Math.min(releaseDelayMs, 60_000));
     this.releaseTimer.unref();
   }
 
@@ -150,7 +153,7 @@ export class Protocol {
       if (rpc) await rpc.close();
     }
     this.diskIds = ids;
-    for (const record of records) this.catalog.set(record.id, record);
+    for (const record of records) if (!this.meta.trashPending?.[record.id]?.deleted) this.catalog.set(record.id, record);
     for (const [id, archived] of Object.entries(this.meta.trashed ?? {})) this.catalog.set(id, { ...archived.record, path: archived.trashPath });
     for (const [id, rpc] of this.loaded) {
       const existing = this.catalog.get(id);
@@ -163,7 +166,7 @@ export class Protocol {
   async rpc(threadId) {
     await this.discover();
     if (this.catalog.get(threadId)?.isSubAgent) throw invalid('Sub-agent threads are read-only in Remote.');
-    if (this.meta.trashed?.[threadId]) throw invalid('Session is in Trash. Unarchive it before resuming or sending tasks.');
+    if (this.meta.trashed?.[threadId] || this.meta.trashPending?.[threadId]) throw invalid('Session is archived. Unarchive it before resuming or sending tasks.');
     const cached = this.loaded.get(threadId);
     if (cached && !cached.failure) {
       await this.discover();
@@ -185,18 +188,35 @@ export class Protocol {
       const { header } = await this.history.readHistory(record.path);
       if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can resume it.');
       if (header.id !== threadId) throw invalid('Session history identity changed. Refresh the list before resuming.');
-      await this.trash.assertSessionNotOpen(record.path);
-      const rpc = await this.sessions.open({ cwd: record.cwd, sessionFile: record.path });
+      if (!this.sessions.hosted) await this.trash.assertSessionNotOpen(record.path);
+      const rpc = await this.openSaved(record);
       if (rpc.id !== threadId || await historyPath(rpc.sessionFile) !== await historyPath(record.path)) {
         await rpc.close();
         throw invalid('Pi opened a different session. Refresh the list before retrying.');
       }
       this.register(rpc);
+      await this.joinExternalTurn(rpc);
       return rpc;
     })();
     this.opening.set(threadId, opening);
     try { return await opening; }
     finally { this.opening.delete(threadId); }
+  }
+
+  // pd cannot join a session that a Pi outside its hosts has open: it fails, or may start a second Pi on the file.
+  async openSaved(record) {
+    const conflict = () => invalid('Session is open in a Pi outside pi-agents, so Remote cannot join it. Quit that Pi first, then retry.');
+    let rpc;
+    try { rpc = await this.sessions.open({ cwd: record.cwd, sessionFile: record.path }); }
+    catch (error) {
+      if (this.sessions.hosted && (await this.trash.sessionPids(record.path)).length) throw conflict();
+      throw error;
+    }
+    if (this.sessions.hosted && (await this.trash.sessionPids(record.path).catch(async error => { await rpc.close(); throw error; })).length > 1) {
+      await rpc.close();
+      throw conflict();
+    }
+    return rpc;
   }
 
   register(rpc) {
@@ -277,7 +297,7 @@ export class Protocol {
       ephemeral: !record.path, forkedFromId: record.isSubAgent ? null : this.meta.parents?.[threadId] ?? record.parentSessionId ?? null, parentThreadId: record.isSubAgent ? record.parentSessionId ?? null : null,
       status: this.active.has(threadId) ? { type: 'active', activeFlags: [] } : { type: rpc ? 'idle' : 'notLoaded' },
       turns: includeTurns ? await this.turns(threadId) : [], source, threadSource: 'pi',
-      agentNickname: nickname, agentRole: null, canAcceptDirectInput: !record.isSubAgent && !this.meta.trashed?.[threadId] && (this.inputEligibility.get(threadId) ?? Boolean(this.meta.owned?.[threadId])), extra: null, gitInfo: null,
+      agentNickname: nickname, agentRole: null, canAcceptDirectInput: !record.isSubAgent && !this.meta.trashed?.[threadId] && !this.meta.trashPending?.[threadId] && (this.inputEligibility.get(threadId) ?? Boolean(this.meta.owned?.[threadId])), extra: null, gitInfo: null,
       historyMode: 'paginated', projectId: null, section: null, sectionEnteredAt: null,
     };
   }
@@ -408,11 +428,11 @@ export class Protocol {
     }
   }
 
-  // A saved thread is unloaded as soon as Pi has no work, so another Pi can open it; the next send reopens it.
-  // Like Codex app-server, other threads are unloaded once unsubscribed after a delay.
+  // Without pi-agents, a saved thread is unloaded as soon as Pi has no work, so another Pi can open it; the next send reopens it.
+  // Like Codex app-server, other threads are unloaded once unsubscribed after a delay; unloading a hosted thread only disconnects.
   releasable(threadId, rpc) {
     const queue = this.meta.queues?.[threadId];
-    const saved = [...this.sessions.persistedPaths.values()].includes(rpc);
+    const saved = !this.sessions.hosted && [...this.sessions.persistedPaths.values()].includes(rpc);
     return this.loaded.get(threadId) === rpc && !rpc.failure && !rpc.closing
       && !this.active.has(threadId) && !this.inUse.has(threadId) && !this.opening.has(threadId)
       && !rpc.state.isStreaming && !rpc.state.isCompacting && !rpc.state.pendingMessageCount && !(queue?.items.length && !queue.paused)
@@ -439,7 +459,6 @@ export class Protocol {
     }
   }
 
-  // Pi decides whether it has work, including other extensions' background work; a busy Pi is kept and retried later.
   async releaseThread(threadId, rpc) {
     let done;
     this.releases.set(threadId, new Promise(resolve => { done = resolve; }));
@@ -449,14 +468,6 @@ export class Protocol {
       if (!this.releasable(threadId, rpc)) return;
       await rpc.refresh();
       if (!this.releasable(threadId, rpc)) return;
-      let busy;
-      const unsubscribe = rpc.onEvent(event => {
-        if (event.type === 'extension_error' && event.extensionPath === `command:${releaseCommand}`) busy = event.error;
-      });
-      let result;
-      try { result = await rpc.request('prompt', { message: `/${releaseCommand}` }); }
-      finally { unsubscribe(); }
-      if (busy || result?.disposition !== 'handled') { this.lastUsed.set(threadId, Date.now()); return; }
       await rpc.close();
       this.loaded.delete(threadId);
       this.lastUsed.delete(threadId);

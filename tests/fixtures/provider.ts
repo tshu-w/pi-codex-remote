@@ -1,5 +1,5 @@
 
-import { appendFileSync, existsSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
@@ -9,9 +9,9 @@ const text = content => typeof content === 'string' ? content : content.filter(b
 export default function (pi) {
   let release;
   pi.registerCommand('fixture-release', { description: 'Release a held reply', handler: async () => release?.() });
-  const children = new Map();
-  // Like pi-agents, a waiting child (the researcher) keeps Pi busy.
-  pi.events.on('busy:query', query => { if (existsSync(join(process.cwd(), 'fixture-busy')) || children.has('researcher')) query.busy = true; });
+  // Children outlive this Pi process, which Remote releases after each turn.
+  const childrenFile = process.env.FIXTURE_CALLS + '.children.json';
+  const children = new Map(existsSync(childrenFile) ? JSON.parse(readFileSync(childrenFile, 'utf8')) : []);
   pi.on('tool_call', async (event, ctx) => {
     if (event.toolName === 'write' && event.input.path === 'blocked.txt' && !(await ctx.ui.confirm('Fixture permission', 'Allow write?'))) return { block: true, reason: 'Fixture write denied' };
   });
@@ -30,7 +30,8 @@ export default function (pi) {
       return { content: [{ type: 'text', text: 'nested done' }] };
     },
   });
-  pi.registerTool({ name: 'agent', label: 'Fixture agent', description: 'Offline pi-agents contract fixture',
+  // pi-agents registers the real tool when its hosts are tested.
+  if (!process.env.FIXTURE_HOSTED) pi.registerTool({ name: 'agent', label: 'Fixture agent', description: 'Offline pi-agents contract fixture',
     parameters: { type: 'object', properties: { action: { type: 'string' }, name: { type: 'string' }, target: {}, message: { type: 'string' }, deliverAs: { type: 'string' } }, required: ['action'] },
     async execute(_id, args, _signal, _update, ctx) {
       let details;
@@ -44,6 +45,7 @@ export default function (pi) {
         child.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'child:' + args.name }], api: 'fixture-api', provider: 'fixture', model: 'scripted', stopReason: 'stop', timestamp: Date.now(),
           usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
         children.set(args.name, child.getSessionId());
+        writeFileSync(childrenFile, JSON.stringify([...children]));
         details = { id: child.getSessionId(), name: args.name, queued: false };
       } else {
         const ids = [args.target].flat().map(target => children.get(target) ?? target);

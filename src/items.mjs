@@ -112,8 +112,11 @@ export function updateToolItem(item, result, { complete = false, isError = false
     Object.assign(item, { type: 'dynamicToolCall', id, tool: 'read', arguments: args ?? null, namespace: null,
       contentItems: null, durationMs: null, status: 'inProgress', success: null });
   }
+  // A write shows its new content; older Remote histories saved a diff in codexRemoteChange.
   const change = details?.codexRemoteChange ?? (name === 'edit' && typeof details?.patch === 'string' && typeof args?.path === 'string'
-    ? { path: toolPath(args.path, cwd), kind: { type: 'update' }, diff: details.patch } : null);
+    ? { path: toolPath(args.path, cwd), kind: { type: 'update' }, diff: details.patch }
+    : name === 'write' && typeof args?.path === 'string' && typeof args?.content === 'string'
+      ? { path: toolPath(args.path, cwd), kind: { type: 'add' }, diff: args.content } : null);
   if (complete && !isError && ['edit', 'write'].includes(name) && change) {
     const { id } = item;
     for (const key of Object.keys(item)) delete item[key];

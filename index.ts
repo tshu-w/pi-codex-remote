@@ -1,16 +1,12 @@
-import { generateUnifiedPatch, resizeImage, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { resizeImage, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Loader, Text } from "@earendil-works/pi-tui";
 import QRCode from "qrcode";
 import { control, start } from "./src/daemon.mjs";
 import { createLiveSessionRegistry } from "./src/live-sessions.mjs";
-import { registerReleaseCommand } from "./src/release-command.mjs";
 import { registerRevertCommand } from "./src/revert-command.mjs";
-import { registerToolPresentation } from "./src/tool-presentation.mjs";
 
 export default function codexRemote(pi: ExtensionAPI) {
   registerRevertCommand(pi);
-  registerReleaseCommand(pi);
-  registerToolPresentation(pi, generateUnifiedPatch);
   const liveSessions = createLiveSessionRegistry();
   pi.on("session_start", (_event, ctx) => {
     liveSessions.register({
@@ -27,7 +23,7 @@ export default function codexRemote(pi: ExtensionAPI) {
 
   pi.on("input", async (event, ctx) => {
     if (ctx.mode === "tui" && event.source === "interactive") ctx.ui.setWidget("codex-remote-pair", undefined);
-    if (ctx.mode !== "rpc" || process.env.PI_CODEX_REMOTE_RPC !== "1" || !event.images?.length) return;
+    if (event.source !== "rpc" || !event.images?.length) return;
     for (const image of event.images) {
       const decoded = await resizeImage(Buffer.from(image.data, "base64"), image.mimeType, ctx.model?.inputLimits?.images?.resize).catch(() => null);
       if (!decoded) {

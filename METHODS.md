@@ -8,7 +8,7 @@ Empty methods return no resources; unimplemented requests return -32601. Wildcar
 | Methods | Status | Limits and behavior |
 | --- | --- | --- |
 | `thread/start`, `thread/unsubscribe` | implemented |  |
-| `thread/resume` | implemented | Sessions open in another Pi are read-only; path must match threadId; history overrides are unsupported. developerInstructions and named compatibility settings are ignored |
+| `thread/resume` | implemented | Sessions open in another Pi are read-only, unless a pi-agents host has them; path must match threadId; history overrides are unsupported. developerInstructions and named compatibility settings are ignored |
 | `thread/fork` | implemented | Whole thread, through a turn, or before a turn |
 | `thread/archive`, `thread/unarchive`, `thread/delete` | implemented | Moves the session file to the macOS Trash; Restores the session file from the Trash; Moves the session file to the macOS Trash and removes the thread from Remote |
 | `thread/name/set` | implemented |  |

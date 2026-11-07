@@ -1,12 +1,11 @@
 export const revertCommand = 'codex-remote-revert';
 export const revertEntryType = 'codex-remote.revert';
 
+// Registered everywhere: a pi-agents host runs it in interactive mode.
 export function registerRevertCommand(pi) {
-  if (process.env.PI_CODEX_REMOTE_RPC !== '1') return;
   pi.registerCommand(revertCommand, {
     description: 'Apply a validated Remote history branch change',
     handler: async (args, ctx) => {
-      if (ctx.mode !== 'rpc') throw new Error('Remote history commands require RPC mode.');
       const request = JSON.parse(args);
       const { operationId, threadId, expectedLeafId, targetId } = request;
       if (![operationId, threadId, expectedLeafId, targetId].every(value => typeof value === 'string' && value.length > 0)) throw new Error('Invalid Remote history command.');

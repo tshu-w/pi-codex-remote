@@ -68,7 +68,13 @@ async function canonicalPath(path) {
 
 // A snapshot guard, not a lease: a Pi can start or switch sessions after it returns.
 // Only matching live registrations establish occupancy; unregistered writers are not detectable.
-export async function assertSessionNotOpen(path, { ignorePids = [] } = {}) {
+export async function assertSessionNotOpen(path, options) {
+  const [pid] = await sessionPids(path, options);
+  if (pid) throw new Error(`Session is open in Pi (PID ${pid}). Close that session before archiving or restoring`);
+}
+
+// PIDs of the live Pi processes registered with this session open.
+export async function sessionPids(path, { ignorePids = [] } = {}) {
   const target = await canonicalPath(path);
   const ignored = new Set(ignorePids);
   const uid = process.getuid();
@@ -88,6 +94,7 @@ export async function assertSessionNotOpen(path, { ignorePids = [] } = {}) {
     }
   }
   const directory = liveSessionsDir();
+  const pids = [];
   let files;
   try { files = await readdir(directory); }
   catch (error) {
@@ -110,8 +117,7 @@ export async function assertSessionNotOpen(path, { ignorePids = [] } = {}) {
     const running = processes.get(pid);
     // Old rows cannot authenticate a reused PID or describe its new session.
     if (!running || record.processStart !== running.processStart) continue;
-    if (record.sessionFile !== null && await canonicalPath(record.sessionFile) === target) {
-      throw new Error(`Session is open in Pi (PID ${pid}). Close that session before archiving or restoring`);
-    }
+    if (record.sessionFile !== null && await canonicalPath(record.sessionFile) === target) pids.push(pid);
   }
+  return pids;
 }

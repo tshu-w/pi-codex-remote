@@ -21,6 +21,9 @@ export class RpcSession {
     this.pending = new Map();
     this.listeners = new Set();
     this.nextId = 0;
+    // Counts persisted messages, so a snapshot shows which of them a turn had already written.
+    this.messageEnds = 0;
+    this.messageEndsAt = new WeakMap();
     this.requestTimeoutMs = requestTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.onState = onState;
@@ -81,10 +84,16 @@ export class RpcSession {
       if (!pending) return;
       this.pending.delete(record.id);
       clearTimeout(pending.timer);
-      if (record.success) pending.resolve(record.data);
-      else pending.reject(new Error(record.error || `Pi RPC ${record.command} failed`));
+      if (record.success) {
+        if (record.data && typeof record.data === 'object') this.messageEndsAt.set(record.data, this.messageEnds);
+        pending.resolve(record.data);
+      } else {
+        pending.reject(new Error(record.error || `Pi RPC ${record.command} failed`));
+        for (const listener of this.listeners) listener({ type: 'request_failed', command: record.command });
+      }
       return;
     }
+    if (record.type === 'message_end' && ['user', 'assistant', 'toolResult', 'custom', 'system'].includes(record.message?.role)) this.messageEnds++;
     if (record.type === 'agent_start') this.state.isStreaming = true;
     if (record.type === 'agent_settled') this.state.isStreaming = false;
     if (record.type === 'compaction_start') this.state.isCompacting = true;
@@ -154,9 +163,11 @@ export class RpcSession {
 }
 
 export class Sessions {
-  constructor({ command = 'pi', args = [], requestTimeoutMs = 120000, shutdownTimeoutMs = 5000 } = {}) {
+  // `hosted` ({ command, args }) runs saved sessions in pi-agents hosts; probes always run Pi directly.
+  constructor({ command = 'pi', args = [], hosted, requestTimeoutMs = 120000, shutdownTimeoutMs = 5000 } = {}) {
     this.command = command;
     this.args = args;
+    this.hosted = hosted;
     this.requestTimeoutMs = requestTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.paths = new Map();
@@ -206,15 +217,17 @@ export class Sessions {
   }
 
   async start({ cwd = process.cwd(), sessionFile, forkFrom, model, effort, ephemeral = false } = {}) {
-    const args = [...this.args, '--mode', 'rpc'];
+    const host = this.hosted && !ephemeral;
+    const args = [...(host ? this.hosted.args ?? [] : this.args), '--mode', 'rpc'];
     if (ephemeral) args.push('--no-session');
     if (sessionFile) args.push('--session', sessionFile);
     if (forkFrom) args.push('--fork', forkFrom);
     if (model) args.push('--model', typeof model === 'string' ? model : `${model.provider}/${model.modelId ?? model.id}`);
     if (effort) args.push('--thinking', effort);
-    const child = spawn(this.command, args, {
+    // A host keeps its starter's environment for later terminals.
+    const child = spawn(host ? this.hosted.command : this.command, args, {
       cwd: resolve(cwd),
-      env: { ...process.env, PI_OFFLINE: '1', PI_CODEX_REMOTE_RPC: '1' },
+      env: host ? process.env : { ...process.env, PI_OFFLINE: '1', PI_CODEX_REMOTE_RPC: '1' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const session = new RpcSession(child, {

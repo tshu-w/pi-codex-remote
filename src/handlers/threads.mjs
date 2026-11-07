@@ -17,7 +17,11 @@ export const threadsHandlers = {
     const cwd = resolve(params.cwd ?? this.cwd);
     workspaceSettings(params, cwd);
     const rpc = await this.sessions.open({ cwd, model: modelIdentity(params.model), ephemeral: params.ephemeral === true });
-    try { providerSettings(params, rpc); await applyEffort(rpc, effort); }
+    try {
+      providerSettings(params, rpc);
+      if (params.model && params.model !== modelKey(rpc.state.model)) await rpc.request('set_model', modelIdentity(params.model));
+      await applyEffort(rpc, effort);
+    }
     catch (error) { await rpc.close(); throw error; }
     (this.meta.owned ??= {})[rpc.id] = true;
     await this.saveMetadata();
@@ -96,7 +100,7 @@ export const threadsHandlers = {
       }
     }
     let readOnly = this.catalog.get(params.threadId)?.isSubAgent || !this.meta.owned?.[params.threadId];
-    if (!readOnly && !this.loaded.has(params.threadId)) {
+    if (!readOnly && !this.loaded.has(params.threadId) && !this.sessions.hosted) {
       await this.discover();
       const record = this.catalog.get(params.threadId);
       if (record && !this.meta.trashed?.[params.threadId]) {
@@ -114,7 +118,9 @@ export const threadsHandlers = {
       if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can resume it.');
       if (header.id !== params.threadId) throw invalid('Session history identity changed. Refresh the list before resuming.');
       this.inputEligibility.set(params.threadId, false);
-      if (!record.isSubAgent && !this.meta.trashed?.[params.threadId]) {
+      // pd joins hosted sessions; one open in a Pi outside a host fails on send.
+      if (!record.isSubAgent && !this.meta.trashed?.[params.threadId] && this.sessions.hosted) this.inputEligibility.set(params.threadId, true);
+      else if (!record.isSubAgent && !this.meta.trashed?.[params.threadId]) {
         try {
           await this.trash.assertSessionNotOpen(record.path);
           this.inputEligibility.set(params.threadId, true);
@@ -192,6 +198,8 @@ export const threadsHandlers = {
     if (this.catalog.get(threadId)?.isSubAgent) throw invalid('Sub-agent threads are read-only in Remote.');
     if (!this.meta.trashed?.[threadId]) await this.archive(threadId);
     for (const map of [this.meta.trashed, this.meta.archives, this.meta.owned, this.meta.parents, this.meta.queues]) if (map) delete map[threadId];
+    const pending = this.meta.trashPending?.[threadId];
+    if (pending) this.meta.trashPending[threadId] = { ...pending, deleted: true };
     this.catalog.delete(threadId);
     this.inputEligibility.delete(threadId);
     await this.saveMetadata();
@@ -246,7 +254,7 @@ export const threadsMethods = {
     await this.discover();
     await this.thread(threadId);
     if (this.catalog.get(threadId)?.isSubAgent) throw invalid('Sub-agent threads are read-only in Remote.');
-    if (this.meta.trashed?.[threadId]) return {};
+    if (this.meta.trashed?.[threadId] || this.meta.trashPending?.[threadId]) return {};
     const record = this.catalog.get(threadId);
     if (!record.path) throw invalid('Ephemeral sessions have no history file to move to Trash.');
     try { await stat(record.path); }
@@ -257,8 +265,27 @@ export const threadsMethods = {
     const { header } = await this.history.readHistory(record.path);
     if (header.id !== threadId) throw invalid('Session history identity changed. Refresh the list before archiving.');
     const rpc = this.loaded.get(threadId);
-    await this.trash.assertSessionNotOpen(record.path, { ignorePids: rpc?.child?.pid ? [rpc.child.pid] : [] });
     const active = this.active.get(threadId);
+    if (this.sessions.hosted) {
+      // The running turn may be the terminal's, so Remote only leaves the session; the file moves once no Pi has it open.
+      const previous = this.meta.archives[threadId];
+      this.meta.archives[threadId] = true;
+      (this.meta.trashPending ??= {})[threadId] = { path: record.path };
+      try { await this.saveMetadata(); }
+      catch (error) {
+        delete this.meta.trashPending[threadId];
+        this.meta.archives[threadId] = previous;
+        throw error;
+      }
+      if (rpc) {
+        await rpc.close();
+        this.loaded.delete(threadId);
+      }
+      if (active) this.finishNotification(active);
+      void this.drainTrash();
+      return {};
+    }
+    await this.trash.assertSessionNotOpen(record.path, { ignorePids: rpc?.child?.pid ? [rpc.child.pid] : [] });
     if (active) {
       await this.dispatch('turn/interrupt', { threadId, turnId: active.turn.id });
       await active.finishing;
@@ -269,6 +296,10 @@ export const threadsMethods = {
     }
     if (active) this.finishNotification(active);
     await this.trash.assertSessionNotOpen(record.path);
+    return this.moveToTrash(threadId, record);
+  },
+
+  async moveToTrash(threadId, record) {
     const originalPath = record.path;
     const trashPath = await this.trash.trashSession(originalPath);
     const previous = this.meta.archives[threadId];
@@ -290,10 +321,44 @@ export const threadsMethods = {
     return {};
   },
 
+  async drainTrash() {
+    if (this.draining || this.queueClosing || !Object.keys(this.meta.trashPending ?? {}).length) return;
+    this.draining = true;
+    try {
+      for (const [threadId, pending] of Object.entries(this.meta.trashPending)) {
+        if (this.loaded.has(threadId) || this.opening.has(threadId)) continue;
+        let releaseMutation;
+        try {
+          releaseMutation = await this.acquireThreadMutation(threadId);
+          if (this.meta.trashPending[threadId] !== pending) continue;
+          let header;
+          try { ({ header } = await this.history.readHistory(pending.path)); }
+          catch (error) { if (error.code !== 'ENOENT') throw error; }
+          if (header?.id === threadId) await this.trash.assertSessionNotOpen(pending.path);
+          delete this.meta.trashPending[threadId];
+          try {
+            if (header?.id !== threadId) await this.saveMetadata();
+            else if (pending.deleted) { await this.trash.trashSession(pending.path); await this.saveMetadata(); }
+            else {
+              if (!this.catalog.has(threadId)) await this.discover();
+              await this.moveToTrash(threadId, { ...this.catalog.get(threadId), path: pending.path });
+            }
+          } catch (error) {
+            this.meta.trashPending[threadId] = pending;
+            throw error;
+          }
+        } catch { /* Still open or unavailable; retried on the next tick. */ }
+        finally { releaseMutation?.(); }
+      }
+    } finally { this.draining = false; }
+  },
+
   async unarchive(threadId) {
     await this.thread(threadId);
     const archived = this.meta.trashed?.[threadId];
     const previous = this.meta.archives[threadId];
+    const pending = this.meta.trashPending?.[threadId];
+    if (pending) delete this.meta.trashPending[threadId];
     if (archived) {
       let header;
       try { ({ header } = await this.history.readHistory(archived.trashPath)); }
@@ -311,6 +376,7 @@ export const threadsMethods = {
     try { await this.saveMetadata(); }
     catch (error) {
       this.meta.archives[threadId] = previous;
+      if (pending) this.meta.trashPending[threadId] = pending;
       if (archived) {
         try { await this.trash.restoreSession(archived.originalPath, archived.trashPath); }
         catch (rollback) { throw new Error(`Unarchive metadata failed; history is at ${archived.originalPath}. ${rollback.message}`, { cause: error }); }
@@ -341,17 +407,18 @@ export const threadsMethods = {
   async rewind(threadId, beforeTurnId, emit) {
     if (!this.meta.owned?.[threadId]) throw invalid('External Pi histories are read-only for revert. Fork before editing, or use a session already explicitly taken over by Remote.');
     if (this.active.has(threadId)) throw invalid('Cannot revert an active turn. Stop it and wait for Pi to become idle.');
-    if (this.meta.trashed?.[threadId]) throw invalid('Session is in Trash. Unarchive it before editing.');
+    if (this.meta.trashed?.[threadId] || this.meta.trashPending?.[threadId]) throw invalid('Session is archived. Unarchive it before editing.');
     await this.discover();
     const record = this.catalog.get(threadId);
     if (!record?.path) throw invalid('Revert requires a persisted Pi session.');
     const wireTurns = await this.turns(threadId);
     if (!wireTurns.some(turn => turn.id === beforeTurnId)) throw invalid('beforeTurnId is not in the active thread history. Refresh the thread before retrying.');
     const cached = this.loaded.get(threadId);
-    await this.trash.assertSessionNotOpen(record.path, { ignorePids: cached?.child?.pid ? [cached.child.pid] : [] });
+    // One writer: under pd it is the host, which revert joins.
+    if (!this.sessions.hosted) await this.trash.assertSessionNotOpen(record.path, { ignorePids: cached?.child?.pid ? [cached.child.pid] : [] });
     const rpc = await this.rpc(threadId);
     if (rpc.state.isStreaming || rpc.state.isCompacting || rpc.state.pendingMessageCount > 0) throw invalid('Wait for Pi to finish active work, compaction, and queued messages before editing.');
-    await this.trash.assertSessionNotOpen(record.path, { ignorePids: rpc.child?.pid ? [rpc.child.pid] : [] });
+    if (!this.sessions.hosted) await this.trash.assertSessionNotOpen(record.path, { ignorePids: rpc.child?.pid ? [rpc.child.pid] : [] });
     const { entries, leafId } = await rpc.request('get_entries');
     const nativeTurns = this.history.projectTurns(entries, { leafId });
     const targetTurn = nativeTurns.find(turn => (this.meta.entries[turn.id]?.turnId ?? turn.id) === beforeTurnId);
@@ -494,7 +561,7 @@ export const threadsMethods = {
 
   async takeover(params, effort, prompt) {
     const id = params.threadId;
-    if (this.meta.trashed?.[id]) throw invalid('Session is in Trash. Unarchive it before sending tasks.');
+    if (this.meta.trashed?.[id] || this.meta.trashPending?.[id]) throw invalid('Session is archived. Unarchive it before sending tasks.');
     await this.discover();
     const record = this.catalog.get(id);
     if (!record) throw invalid('Thread not found.');
@@ -504,7 +571,8 @@ export const threadsMethods = {
     if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can resume it.');
     if (header.id !== id) throw invalid('Session history identity changed. Refresh the list before sending tasks.');
     this.inputEligibility.delete(id);
-    await this.trash.assertSessionNotOpen(record.path);
+    const hosted = this.sessions.hosted;
+    if (!hosted) await this.trash.assertSessionNotOpen(record.path);
     const probe = await this.probeRpc(record.cwd);
     const saved = sessionSettings(entries);
     const identity = params.model ? modelIdentity(params.model) : saved.model ?? probe.state.model;
@@ -515,23 +583,26 @@ export const threadsMethods = {
     if (effort != null && !supportedEfforts(selected).includes(effort)) throw invalid('Requested reasoning effort is unavailable for the selected Pi model.');
     if (prompt.images?.length && !selected.input?.includes('image')) throw invalid('The selected Pi model does not support image input.');
     // Recheck after the probe; acquisition uses the original path, never a fork.
-    await this.trash.assertSessionNotOpen(record.path);
+    if (!hosted) await this.trash.assertSessionNotOpen(record.path);
     const latest = await this.history.readHistory(record.path);
     if (latest.header.version !== 3 || latest.header.id !== id) throw invalid('Session history identity changed. Refresh the list before sending tasks.');
     let rpc;
     let ownershipAttempted = false;
+    let running = false;
     try {
-      rpc = await this.sessions.open({ cwd: record.cwd, sessionFile: record.path });
+      rpc = await this.openSaved(record);
       if (rpc.id !== id || await historyPath(rpc.sessionFile) !== await historyPath(record.path)) throw invalid('Pi opened a different session. Refresh the list before retrying.');
-      if (rpc.state.isStreaming || rpc.state.isCompacting) throw invalid('Pi session is already running. Wait for it to finish before retrying.');
-      await this.trash.assertSessionNotOpen(record.path, { ignorePids: rpc.child?.pid ? [rpc.child.pid] : [] });
-      if (params.model) await rpc.request('set_model', modelIdentity(params.model));
-      await applyEffort(rpc, effort);
+      // A joined host may be running a turn started elsewhere; Remote follows it as an external turn.
+      running = hosted && rpc.state.isStreaming;
+      if (!running && (rpc.state.isStreaming || rpc.state.isCompacting)) throw invalid('Pi session is already running. Wait for it to finish before retrying.');
+      if (!hosted) await this.trash.assertSessionNotOpen(record.path, { ignorePids: rpc.child?.pid ? [rpc.child.pid] : [] });
+      if (params.model && !running) await rpc.request('set_model', modelIdentity(params.model));
+      if (!running) await applyEffort(rpc, effort);
       (this.meta.owned ??= {})[id] = true;
       ownershipAttempted = true;
       await this.saveMetadata();
       this.register(rpc);
-      return rpc;
+      if (running) await this.joinExternalTurn(rpc);
     } catch (error) {
       if (ownershipAttempted) delete this.meta.owned[id];
       try { if (rpc) await rpc.close(); }
@@ -545,5 +616,7 @@ export const threadsMethods = {
       }
       throw error;
     }
+    if (running) throw invalid('Pi is running a turn started elsewhere. Steer it or wait for it to finish.');
+    return rpc;
   },
 };

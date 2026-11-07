@@ -25,9 +25,9 @@ export const turnsHandlers = {
         }
         if (response?.disposition === 'queued') {
           await active.rpc.refresh();
+          // Pi's queue may also hold terminal input, so it is never cleared.
           if (!active.rpc.state.isStreaming && active.rpc.state.pendingMessageCount > 0 && !active.interrupted) {
-            await active.rpc.request('clear_queue');
-            const message = 'Pi settled before steering input could be consumed. Pending input was removed; send it as a new turn.';
+            const message = 'Pi settled before steering input could be consumed. It stays queued in Pi for the next turn.';
             active.error = active.error ? `${active.error} ${message}` : message;
             throw invalid(message);
           }
@@ -73,8 +73,7 @@ export const turnsHandlers = {
     active.stopping ||= (async () => {
       await active.acceptance;
       await active.inputs;
-      await active.rpc.request('clear_queue');
-      await active.rpc.request('abort_bash');
+      if (active.shells?.length) await active.rpc.request('abort_bash');
       await active.rpc.request('abort');
     })();
     await active.stopping;
@@ -102,6 +101,8 @@ export const turnsMethods = {
     const effort = executionSettings(params);
     const prompt = inputPrompt(params.input, this.attachments, emit);
     if (params.model) modelIdentity(params.model);
+    // Subscribed first, so the client sees a turn started elsewhere that takeover joins.
+    if (emit) this.subscribe(params.threadId, emit);
     if (this.active.has(params.threadId)) throw invalid('Thread is already running. Use turn/steer.');
     const external = !this.meta.owned?.[params.threadId];
     const rpc = external ? await this.takeover(params, effort, prompt) : await this.rpc(params.threadId);
@@ -113,7 +114,6 @@ export const turnsMethods = {
       await applyEffort(rpc, effort);
     }
     if (prompt.images?.length && !rpc.state.model?.input?.includes('image')) throw invalid('The selected Pi model does not support image input.');
-    if (emit) this.subscribe(params.threadId, emit);
     const active = { rpc, turn: { id: turnId, items: [], status: 'inProgress', error: null, startedAt: seconds(Date.now()), completedAt: null, durationMs: null, itemsView: 'full' }, messageIndex: -1, blocks: new Map(), tools: new Map(), messages: [], users: [{ clientId: params.clientUserMessageId ?? null }], completed: new Set(), startedAt: Date.now() };
     active.acceptance = new Promise(resolve => { active.accept = resolve; });
     active.inputs = Promise.resolve();
@@ -198,10 +198,10 @@ export const turnsMethods = {
     this.notify(active.rpc.id, 'item/completed', { threadId: active.rpc.id, turnId: active.turn.id, item, completedAtMs: Date.now() });
   },
 
-  startOperationTurn(rpc, kind) {
+  startOperationTurn(rpc, kind, turnId = randomUUID()) {
     const active = {
       kind, rpc,
-      turn: { id: randomUUID(), items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: seconds(Date.now()), completedAt: null, durationMs: null },
+      turn: { id: turnId, items: [], itemsView: 'full', status: 'inProgress', error: null, startedAt: seconds(Date.now()), completedAt: null, durationMs: null },
       tools: new Map(), blocks: new Map(), messages: [], users: [], completed: new Set(),
       startedAt: Date.now(), acceptance: Promise.resolve(true), inputs: Promise.resolve(),
     };
@@ -209,6 +209,55 @@ export const turnsMethods = {
     this.notify(rpc.id, 'thread/status/changed', { threadId: rpc.id, status: { type: 'active', activeFlags: [] } });
     this.notify(rpc.id, 'turn/started', { threadId: rpc.id, turn: { ...active.turn, items: [], itemsView: 'notLoaded' } });
     return active;
+  },
+
+  // A turn another client of the host started, as from its terminal.
+  startExternalTurn(rpc) {
+    const active = this.startOperationTurn(rpc);
+    Object.assign(active, { external: true, messageIndex: -1 });
+    const started = rpc.messageEnds;
+    // Messages this turn ended before the snapshot are already in it; they are the last ones written.
+    active.inputs = rpc.request('get_entries').then(snapshot => {
+      const written = rpc.messageEndsAt.get(snapshot) - started;
+      const messages = snapshot.entries.filter(entry => ['message', 'custom_message'].includes(entry.type));
+      const own = new Set(messages.slice(messages.length - written).map(entry => entry.id));
+      active.priorEntries = new Set(snapshot.entries.filter(entry => !own.has(entry.id)).map(entry => entry.id));
+    }, error => { active.error = error.message; });
+    return active;
+  },
+
+  // Joining a host mid-turn continues the turn its history already shows.
+  async joinExternalTurn(rpc) {
+    if (!this.sessions.hosted || !rpc.state.isStreaming || this.active.has(rpc.id)) return;
+    const { entries, leafId } = await rpc.request('get_entries');
+    // Events before the snapshot had no turn to join; history shows them.
+    if (!rpc.state.isStreaming || this.active.has(rpc.id)) return;
+    const native = this.history.projectTurns(entries, { leafId }).at(-1);
+    const first = native ? entries.findIndex(entry => entry.id === native.id) : entries.length;
+    const active = this.startOperationTurn(rpc, undefined, native ? this.meta.entries[native.id]?.turnId ?? native.id : undefined);
+    Object.assign(active, { external: true, priorEntries: new Set(entries.slice(0, first).map(entry => entry.id)) });
+    for (const entry of entries.slice(first)) {
+      const mapping = this.meta.entries[entry.id];
+      if (entry.message?.role === 'user') {
+        const user = { clientId: mapping?.clientId ?? null, itemId: mapping?.itemId ?? entry.id };
+        active.users.push(user);
+        active.completed.add(user.itemId);
+      }
+      // Assistant messages already written keep their history item IDs.
+      if (entry.message?.role === 'assistant') active.messages.push(new Map());
+    }
+    active.observedUsers = active.users.length;
+    active.messageIndex = active.messages.length - 1;
+  },
+
+  // A host that stops is reopened by pd: its turn ends without events, and only pending requests fail.
+  reconcileTurn(active) {
+    // Work in flight, such as a prompt, steer or `!` command, settles the turn itself.
+    if (!this.sessions.hosted || active.kind || active.finishing || active.finished || active.rpc.pending?.size) return;
+    void this.finish(active).catch(error => {
+      active.error = error.message;
+      this.finishNotification(active);
+    });
   },
 
   // Pi RPC `bash` is the `!command` path: it runs user_bash hooks and records the output in context.
@@ -273,6 +322,14 @@ export const turnsMethods = {
       return;
     }
     if (event.type === 'process_exit') this.loaded.delete(rpc.id);
+    if (event.type === 'request_failed') {
+      if (active) this.reconcileTurn(active);
+      return;
+    }
+    if (event.type === 'agent_start' && !active && this.sessions.hosted) {
+      this.startExternalTurn(rpc);
+      return;
+    }
     if (event.type === 'compaction_start') {
       const operation = active ?? this.startOperationTurn(rpc, 'compaction');
       operation.compactionItem = this.startItem(operation, { type: 'contextCompaction', id: randomUUID() });
@@ -307,6 +364,13 @@ export const turnsMethods = {
       });
       return;
     }
+    // An assistant message begins at its message_start, or at its first event when Remote joined after it.
+    const assistant = event.type === 'message_update' || (['message_start', 'message_end'].includes(event.type) && event.message.role === 'assistant');
+    if (assistant && (event.type === 'message_start' || !active.inMessage)) {
+      active.messageIndex++;
+      active.blocks = new Map();
+    }
+    if (assistant) active.inMessage = event.type !== 'message_end';
     if (event.type === 'message_end' && event.message.role === 'user') {
       const index = active.observedUsers ?? 0;
       active.observedUsers = index + 1;
@@ -316,9 +380,6 @@ export const turnsMethods = {
       const item = this.history.projectTurns([{ type: 'message', id: user.itemId, timestamp: new Date().toISOString(), message: event.message }], { senderThreadId: rpc.id })[0].items[0];
       item.clientId = user.clientId;
       this.completeItem(active, this.startItem(active, item));
-    } else if (event.type === 'message_start' && event.message.role === 'assistant') {
-      active.messageIndex++;
-      active.blocks = new Map();
     } else if (event.type === 'message_update') {
       const update = event.assistantMessageEvent;
       const thinking = update.type.startsWith('thinking_');
@@ -359,6 +420,20 @@ export const turnsMethods = {
       active.messages.push(new Map(active.blocks));
       active.error = message.stopReason === 'error' ? message.errorMessage ?? 'Pi model request failed' : undefined;
       active.interrupted ||= message.stopReason === 'aborted';
+    } else if (event.parentToolCallId && event.type.startsWith('tool_execution_')) {
+      // Like history, nested calls show what Pi records in nestedCalls: no results.
+      if (event.type === 'tool_execution_start') {
+        active.tools.set(event.toolCallId, this.startItem(active, toolItem(event.toolCallId, event.toolName, event.args ?? null, { cwd: rpc.cwd, senderThreadId: rpc.id })));
+        (active.toolStartedAt ??= new Map()).set(event.toolCallId, Date.now());
+      } else if (event.type === 'tool_execution_end') {
+        const item = active.tools.get(event.toolCallId);
+        if (!item) return;
+        item.status = event.isError ? 'failed' : 'completed';
+        if (!['fileChange', 'collabAgentToolCall'].includes(item.type)) item.durationMs = event.durationMs ?? Date.now() - (active.toolStartedAt?.get(item.id) ?? Date.now());
+        if (item.type === 'dynamicToolCall') item.success = !event.isError;
+        active.toolStartedAt?.delete(item.id);
+        this.completeItem(active, item);
+      }
     } else if (event.type === 'tool_execution_start') {
       const item = toolItem(event.toolCallId, event.toolName, event.args, { cwd: rpc.cwd, senderThreadId: rpc.id });
       // These cards need the result to distinguish images, patches and real tool identities.
@@ -411,17 +486,14 @@ export const turnsMethods = {
     active.finishing = (async () => {
       await active.acceptance;
       await active.inputs;
-      await active.stopping;
+      await active.stopping?.catch(() => {});
       await active.rpc.refresh();
       if (active.rpc.state.isStreaming) return;
-      if (active.rpc.state.pendingMessageCount > 0) {
-        await active.rpc.request('clear_queue');
-        const message = 'Pi settled with unconsumed steering input. Pending input was removed; send it as a new turn.';
-        active.error = active.error ? `${active.error} ${message}` : message;
+      if (active.priorEntries) {
+        const { entries } = await active.rpc.request('get_entries');
+        this.recordUsers(active, entries);
+        await this.saveMetadata();
       }
-      const { entries } = await active.rpc.request('get_entries');
-      this.recordUsers(active, entries);
-      await this.saveMetadata();
       this.finishNotification(active);
     })().finally(() => { active.finishing = undefined; });
     return active.finishing;

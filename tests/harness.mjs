@@ -1,7 +1,8 @@
 // End-to-end fixture: the installed Pi CLI in RPC mode with the production extension,
 // an offline scripted provider, and a phone client speaking app-server JSON-RPC.
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -17,7 +18,6 @@ const remoteExtension = fileURLToPath(new URL('../index.ts', import.meta.url));
 //   "read <file>" / "write <file>" / "bash <command>" call that Pi tool, then answer "done:<tool>"
 //   "hold" streams "held" and waits for `/fixture-release` before finishing with "held:released"
 //   anything else answers "echo:" plus every user text in context, joined by "|"
-// A `fixture-busy` file in the workspace makes Pi report background work.
 const providerFixture = new URL('./fixtures/provider.ts', import.meta.url);
 export async function waitFor(predicate, description, timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
@@ -56,8 +56,10 @@ export function phone(protocol) {
 }
 
 // One isolated Pi home per test file. `start()` creates a fresh Protocol, like a daemon restart.
-export async function setup(t) {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'codex-remote-e2e-')));
+// `hosted` is the pi-agents package directory: saved sessions then run in its hosts.
+export async function setup(t, { hosted } = {}) {
+  // Host sockets live under the state directory and must fit macOS's socket path limit.
+  const root = await realpath(await mkdtemp(join(hosted ? '/tmp' : tmpdir(), 'codex-remote-e2e-')));
   const dirs = { cwd: join(root, 'workspace'), config: join(root, 'config'), sessions: join(root, 'sessions'),
     home: join(root, 'home'), state: join(root, 'xdg-state'), trash: join(root, 'Trash') };
   await Promise.all(Object.values(dirs).map(path => mkdir(path, { recursive: true })));
@@ -75,6 +77,12 @@ export async function setup(t) {
   const protocols = [];
   t.after(async () => {
     await Promise.allSettled(protocols.map(protocol => protocol.close()));
+    // Hosts outlive their clients, and pi-agents' daemon its hosts; a host's socket is named after its PID.
+    for (const file of await readdir(join(dirs.state, 'pi/agents/runtime')).catch(() => [])) {
+      const pid = Number(/^h-(\d+)\.sock$/.exec(file)?.[1]);
+      if (pid) try { process.kill(pid); } catch {}
+    }
+    if (hosted) spawnSync('/usr/bin/pkill', ['-f', `daemon.mjs ${dirs.sessions}`]);
     await rm(root, { recursive: true, force: true });
   });
   // Archive moves files into a fixture directory instead of the user's Trash.
@@ -83,14 +91,16 @@ export async function setup(t) {
     await rename(path, target);
     return target;
   } };
+  const env = ['-i', `PATH=${process.env.PATH}`, `HOME=${dirs.home}`, `XDG_STATE_HOME=${dirs.state}`,
+    `PI_CODING_AGENT_DIR=${dirs.config}`, `PI_CODING_AGENT_SESSION_DIR=${dirs.sessions}`, `FIXTURE_CALLS=${calls}`,
+    'PI_OFFLINE=1', 'PI_SKIP_VERSION_CHECK=1', 'PI_TELEMETRY=0'];
+  const options = ['--tools', 'read,bash,edit,write,grep,find,ls,mcp__fixture__lookup,nested,agent', '--no-extensions', '-e', remoteExtension, '-e', extension, '--no-skills', '--no-prompt-templates',
+    '--no-themes', '--no-context-files', '--session-dir', dirs.sessions];
   const start = ({ releaseDelayMs } = {}) => {
     const sessions = new Sessions({
       command: '/usr/bin/env',
-      args: ['-i', `PATH=${process.env.PATH}`, `HOME=${dirs.home}`, `XDG_STATE_HOME=${dirs.state}`,
-        `PI_CODING_AGENT_DIR=${dirs.config}`, `PI_CODING_AGENT_SESSION_DIR=${dirs.sessions}`, `FIXTURE_CALLS=${calls}`,
-        'PI_OFFLINE=1', 'PI_SKIP_VERSION_CHECK=1', 'PI_TELEMETRY=0', 'PI_CODEX_REMOTE_RPC=1',
-        'pi', '--tools', 'read,bash,edit,write,grep,find,ls,mcp__fixture__lookup,nested,agent', '--no-extensions', '-e', remoteExtension, '-e', extension, '--no-skills', '--no-prompt-templates',
-        '--no-themes', '--no-context-files', '--session-dir', dirs.sessions],
+      args: [...env, 'PI_CODEX_REMOTE_RPC=1', 'pi', ...options],
+      hosted: hosted && { command: '/usr/bin/env', args: [...env, 'FIXTURE_HOSTED=1', 'pi-agents', '-e', hosted, ...options] },
       requestTimeoutMs: 30000, shutdownTimeoutMs: 1000,
     });
     const protocol = new Protocol({ sessions, cwd: dirs.cwd, stateDir: join(root, 'remote-state'), trash: fixtureTrash, releaseDelayMs });

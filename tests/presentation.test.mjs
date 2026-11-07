@@ -33,20 +33,25 @@ test('phone tool cards and message phases retain their contents after reopening 
     assert.equal(item.command, ['read "input.txt"', 'grep "fixture-data" "."', 'find "*.txt" "."', 'ls "."'][index]);
     assert.ok(item.aggregatedOutput.includes(index === 0 ? 'fixture-data' : 'input.txt'));
   }
-  for (const [index, kind, text] of [[4, 'add', '+written'], [5, 'update', '+edited'], [6, 'update', '+replaced']]) {
+  for (const [index, kind, text] of [[4, 'add', 'written'], [5, 'update', '+edited'], [6, 'add', 'replaced']]) {
     const item = completed[index].items.find(item => item.type === 'fileChange');
     assert.equal(item.status, 'completed');
     assert.equal(item.changes[0].kind.type, kind);
     assert.equal(item.changes[0].path, join(f.cwd, 'output.txt'));
-    assert.ok(item.changes[0].diff.includes(text));
+    if (kind === 'add') assert.equal(item.changes[0].diff, text);
+    else assert.ok(item.changes[0].diff.includes(text));
   }
   const mcp = completed[7].items.find(item => item.type === 'mcpToolCall');
   assert.equal(mcp.server, 'fixture-server');
   assert.equal(mcp.tool, 'lookup-original');
   assert.equal(mcp.result.content[0].text, 'lookup result');
+  // Nested calls show Pi's nestedCalls record: arguments and status, no results.
   const nested = completed[8].items;
-  assert.equal(nested.find(item => item.type === 'commandExecution').aggregatedOutput, 'fixture-data\n');
-  assert.equal(nested.find(item => item.type === 'mcpToolCall').result.content[0].text, 'lookup result');
+  const nestedRead = nested.find(item => item.type === 'commandExecution');
+  assert.equal(nestedRead.command, 'read "input.txt"');
+  assert.equal(nestedRead.status, 'completed');
+  assert.equal(nestedRead.aggregatedOutput, null);
+  assert.equal(nested.find(item => item.type === 'dynamicToolCall' && item.tool === 'mcp__fixture__lookup').success, true);
   const failed = completed[9].items.find(item => item.type === 'commandExecution');
   assert.equal(failed.status, 'failed');
   assert.equal(failed.exitCode, 1);

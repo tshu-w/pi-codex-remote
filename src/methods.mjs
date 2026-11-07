@@ -16,7 +16,7 @@ export const methodStatus = {
   'thread/start': ['implemented'],
   'thread/list': ['implemented'],
   'thread/read': ['implemented'],
-  'thread/resume': ['implemented', 'Sessions open in another Pi are read-only; path must match threadId; history overrides are unsupported. developerInstructions and named compatibility settings are ignored'],
+  'thread/resume': ['implemented', 'Sessions open in another Pi are read-only, unless a pi-agents host has them; path must match threadId; history overrides are unsupported. developerInstructions and named compatibility settings are ignored'],
   'thread/fork': ['implemented', 'Whole thread, through a turn, or before a turn'],
   'thread/settings/update': ['implemented', 'Model and thinking level only'],
   'thread/loaded/list': ['implemented'],
