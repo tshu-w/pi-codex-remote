@@ -158,6 +158,8 @@ export async function listSessions({ cwd } = {}) {
         name: info?.name,
         created: new Date(header.timestamp),
         modified: metadata.mtime,
+        // Rewriting a file, as slimming a session does, changes its mtime but not when it was last used.
+        lastActive: new Date(entries.findLast(entry => entry.timestamp)?.timestamp ?? metadata.mtime),
         firstMessage: textContent(first?.message.content),
       };
       if (cacheable) {

@@ -185,6 +185,10 @@ async function serve() {
         catalogSize: protocol.catalog.size, returned: result.data.length, hasNextPage: result.nextCursor != null,
       }));
     }
+    if (!error && ['thread/turns/list', 'thread/items/list'].includes(request.method)) {
+      const { limit, cursor, sortDirection, itemsView, turnId } = request.params ?? {};
+      console.error(JSON.stringify({ method: request.method, limit: limit ?? null, cursor: cursor == null ? null : typeof cursor === 'string' ? cursor.slice(0, 80) : cursor, sortDirection: sortDirection ?? null, itemsView: itemsView ?? null, turnId: turnId ?? null, returned: result.data.length, nextCursor: Boolean(result.nextCursor), backwardsCursor: Boolean(result.backwardsCursor) }));
+    }
     if (request.method === 'thread/resume') {
       console.error(JSON.stringify({
         method: 'thread/resume', excludeTurns: Boolean(request.params?.excludeTurns), initialTurnsPage: Boolean(request.params?.initialTurnsPage),

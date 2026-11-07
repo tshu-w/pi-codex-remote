@@ -63,7 +63,7 @@ export const threadsHandlers = {
     });
     // A thread's Agents list their running ones and the 20 last active; the app reads each it lists, and others open by ID.
     if (params.parentThreadId || params.ancestorThreadId) {
-      const idle = new Set(filtered.filter(record => this.threadStatus(record.id).type !== 'active').sort((a, b) => new Date(b.modified) - new Date(a.modified)).slice(20));
+      const idle = new Set(filtered.filter(record => this.threadStatus(record.id).type !== 'active').sort((a, b) => new Date(b.lastActive ?? b.modified) - new Date(a.lastActive ?? a.modified)).slice(20));
       // A page's anchor stays listed, so its cursor still continues the list.
       const anchor = typeof params.cursor === 'string' ? params.cursor.replace(/^(after|at):/, '') : null;
       filtered = filtered.filter(record => !idle.has(record) || record.id === anchor);
@@ -165,7 +165,7 @@ export const threadsHandlers = {
   async 'thread/settings/update'(params, emit) { return this.updateThreadSettings(params, emit); },
   async 'thread/loaded/list'(params) { return offsetPage([...this.loaded.keys()], params, Math.max(this.loaded.size, 1)); },
   async 'thread/turns/list'(params) {
-    await this.discover();
+    await this.discover({ maxAge: 5000 });
     await this.thread(params.threadId);
     const turns = await this.turns(params.threadId);
     if (params.sortDirection !== 'asc') turns.reverse();
@@ -174,7 +174,7 @@ export const threadsHandlers = {
     return page;
   },
   async 'thread/items/list'(params) {
-    await this.discover();
+    await this.discover({ maxAge: 5000 });
     await this.thread(params.threadId);
     const turns = await this.turns(params.threadId);
     if (params.turnId && !turns.some(turn => turn.id === params.turnId)) throw invalid('Turn not found.');

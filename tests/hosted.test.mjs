@@ -162,22 +162,40 @@ test('an owned Agent thread is active from its input until its result, while its
 test('a thread lists its running Agents and the 20 last active, and opens any other by ID', async t => {
   const { rpc, client, id, agents } = await setup(t, { children: 25 });
   rpc.entries.push({ type: 'custom', id: 'e0', parentId: null, timestamp: new Date().toISOString(), customType: 'pi-agents-agent', data: { id: agents[0].id, name: 'agent-0', inputs: [{ id: 'i1', state: 'running' }] } });
+  // An old session rewritten today keeps its place: recency is its last entry's time.
+  agents[5].lastActive = new Date(4000);
+  agents[2].lastActive = new Date(100_000);
   await client.request('thread/turns/list', { threadId: id });
   const listed = (await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 200, sortKey: 'created_at' })).data;
-  assert.deepEqual(listed.map(thread => thread.id), [...agents.slice(5).reverse(), agents[0]].map(agent => agent.id));
+  assert.deepEqual(listed.map(thread => thread.id), [...agents.slice(6).reverse(), agents[2], agents[0]].map(agent => agent.id));
   assert.equal(listed.at(-1).status.type, 'active');
   // A page's cursor continues the list after another Agent becomes the 20th last active.
   const first = await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 2, sortKey: 'created_at', sortDirection: 'asc' });
-  assert.deepEqual(first.data.map(thread => thread.id), [agents[0].id, agents[5].id]);
-  agents[5].modified = new Date(0);
-  agents[1].modified = new Date(100_000);
+  assert.deepEqual(first.data.map(thread => thread.id), [agents[0].id, agents[2].id]);
+  agents[2].lastActive = new Date(0);
+  agents[1].lastActive = new Date(200_000);
   const next = await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 1, sortKey: 'created_at', sortDirection: 'asc', cursor: first.nextCursor });
   assert.deepEqual(next.data.map(thread => thread.id), [agents[6].id]);
   // A card in the owner's history still opens an Agent the list leaves out.
-  const hidden = agents[2].id;
+  const hidden = agents[3].id;
   assert.equal((await client.request('thread/read', { threadId: hidden, includeTurns: true })).thread.id, hidden);
   assert.deepEqual((await client.request('thread/turns/list', { threadId: hidden })).data, []);
   assert.equal((await client.request('thread/resume', { threadId: hidden })).thread.id, hidden);
+});
+
+test('pages of a history reuse its entries until Pi reports a change', async t => {
+  const { rpc, client, id } = await setup(t);
+  rpc.revision = 0;
+  const user = (entryId, text) => rpc.entries.push({ type: 'message', id: entryId, parentId: rpc.entries.at(-1)?.id ?? null, timestamp: new Date().toISOString(), message: { role: 'user', content: text, timestamp: Date.now() } });
+  const list = async () => (await client.request('thread/turns/list', { threadId: id, itemsView: 'full' })).data.flatMap(turn => turn.items.map(item => item.id));
+  user('u1', 'first');
+  assert.deepEqual(await list(), ['u1']);
+  const reads = rpc.requests.filter(type => type === 'get_entries').length;
+  user('u2', 'second');
+  assert.deepEqual(await list(), ['u1']);
+  assert.equal(rpc.requests.filter(type => type === 'get_entries').length, reads);
+  rpc.revision++;
+  assert.deepEqual(await list(), ['u1', 'u2']);
 });
 
 test('Remote steers and interrupts a terminal turn without clearing Pi\'s queue', async t => {
