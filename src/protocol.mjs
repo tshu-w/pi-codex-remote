@@ -1,6 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { historyPath, listSessions, readHistory, readSearchText, projectTurns } from './history.mjs';
+import { historyPath, listSessions, loadSession, readHistory, readSearchText, projectHistory, projectTurns, watchSessions } from './history.mjs';
 import * as sessionTrash from './trash.mjs';
 import { Attachments } from './attachments.mjs';
 import { ImagePreviews } from './image-previews.mjs';
@@ -24,16 +24,16 @@ function checkSchema(message, requestMethod) {
 const handlers = { ...configHandlers, ...execHandlers, ...filesHandlers, ...turnsHandlers, ...threadsHandlers, ...historyHandlers, ...queueHandlers };
 
 export class Protocol {
-  constructor({ sessions, cwd = process.cwd(), stateDir, history = { listSessions, readHistory, readSearchText, projectTurns }, trash = sessionTrash, onResponse = () => {}, releaseDelayMs = 300_000 }) {
+  constructor({ sessions, cwd = process.cwd(), stateDir, history = { listSessions, loadSession, readHistory, readSearchText, projectHistory, projectTurns, watchSessions }, trash = sessionTrash, onResponse = () => {}, releaseDelayMs = 300_000 }) {
     this.sessions = sessions;
     this.trash = trash;
     this.previews = new ImagePreviews({ stateDir, loadEntries: async threadId => {
       if (!this.catalog.has(threadId)) await this.discover();
       return (await this.entries(threadId)).entries;
     } });
-    this.history = { ...history, projectTurns: (entries, options) => history.projectTurns(entries, {
-      ...options, imageMapper: options?.senderThreadId ? block => this.previews.image(block, options.senderThreadId) : undefined,
-    }) };
+    const previewed = options => ({ ...options, imageMapper: options?.senderThreadId ? block => this.previews.image(block, options.senderThreadId) : undefined });
+    this.history = { ...history, projectTurns: (entries, options) => history.projectTurns(entries, previewed(options)),
+      projectHistory: (entries, options) => history.projectHistory?.(entries, previewed(options)) ?? { turns: history.projectTurns(entries, previewed(options)) } };
     this.cwd = resolve(cwd);
     this.stateDir = stateDir;
     this.attachments = new Attachments({ stateDir });
@@ -53,8 +53,8 @@ export class Protocol {
     this.execProcesses = new Map();
     this.meta = { archives: {}, entries: {}, parents: {} };
     this.runningAgents = new Map();
-    this.entryCache = new WeakMap();
-    this.turnCache = new Map();
+    this.entryReads = new WeakMap();
+    this.projections = new Map();
     this.metaRevision = 0;
     this.ready = this.loadMetadata();
     this.saving = Promise.resolve();
@@ -127,12 +127,15 @@ export class Protocol {
     listeners.add(emit);
   }
 
-  // `maxAge` reuses a refresh that recent, as for the pages of one history.
-  async discover({ maxAge = 0 } = {}) {
+  // A `cached` read reuses the catalog until a watcher on the session directory sees a change; Remote's own changes refresh it.
+  async discover({ cached = false } = {}) {
     if (this.discovery) return this.discovery;
-    if (maxAge && Date.now() - (this.discoveredAt ?? 0) < maxAge) return;
+    if (cached && this.catalogReady && this.catalogWatcher && !this.catalogStale) return;
+    this.catalogWatcher ??= this.history.watchSessions?.(() => { this.catalogStale = true; }, () => { this.catalogWatcher = null; }) ?? null;
+    this.catalogStale = false;
     this.discovery = this.refreshCatalog();
-    try { await this.discovery; this.catalogReady = true; this.discoveredAt = Date.now(); }
+    try { await this.discovery; this.catalogReady = true; }
+    catch (error) { this.catalogStale = true; throw error; }
     finally { this.discovery = undefined; }
   }
 
@@ -244,18 +247,18 @@ export class Protocol {
 
   async entries(threadId) {
     const rpc = this.loaded.get(threadId);
-    if (rpc && (this.meta.owned?.[threadId] || this.active.has(threadId))) {
-      // Pi's entries change with its events and Remote's commands; those extensions append without either show within 10 s.
-      const cached = this.entryCache.get(rpc);
-      if (typeof rpc.revision === 'number' && cached?.revision === rpc.revision && Date.now() - cached.at < 10_000) return cached.entries;
-      const revision = rpc.revision;
-      const entries = await rpc.request('get_entries');
-      this.entryCache.set(rpc, { revision, at: Date.now(), entries });
-      return entries;
-    }
-    const record = this.catalog.get(threadId);
-    if (!record) throw invalid(`Thread not found: ${threadId}`);
-    const history = await this.history.readHistory(record.path);
+    if (rpc && (this.meta.owned?.[threadId] || this.active.has(threadId))) return this.rpcEntries(rpc);
+    const read = async () => {
+      const record = this.catalog.get(threadId);
+      if (!record) throw invalid(`Thread not found: ${threadId}`);
+      return (this.history.loadSession ?? this.history.readHistory)(record.path);
+    };
+    // A session moved since the catalog was read is found again.
+    const history = await read().catch(async error => {
+      if (error.code !== 'ENOENT') throw error;
+      await this.discover();
+      return read();
+    });
     if (history.header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can display it.');
     if (history.header.id !== threadId) throw invalid('Session history identity changed. Refresh the list before retrying.');
     return history;
@@ -272,42 +275,37 @@ export class Protocol {
       if (this.mapCompaction(running, compaction.item, compaction.result, entries)) await this.saveMetadata();
     }
     const active = this.active.get(threadId);
-    // Pages of a long history reuse its projection while its entries, mappings and running turn stay the same.
-    let cached = this.turnCache.get(threadId);
-    if (!(cached?.entries === entries && cached.leafId === leafId && cached.metaRevision === this.metaRevision && cached.activeId === active?.turn.id)) {
-      const turns = this.history.projectTurns(entries, { leafId, entryMappings: this.meta.entries, cwd: rpc?.cwd ?? this.catalog.get(threadId)?.cwd, senderThreadId: threadId });
-      const merged = [];
-      for (const turn of turns) {
-        const mapped = this.meta.entries[turn.id];
-        if (mapped?.turnId) turn.id = mapped.turnId;
-        for (const item of turn.items) {
-          const itemMap = this.meta.entries[item.id];
-          if (itemMap?.itemId) item.id = itemMap.itemId;
-          if (item.type === 'userMessage' && itemMap?.clientId) item.clientId = itemMap.clientId;
-        }
-        const previous = merged.at(-1);
-        if (previous?.id === turn.id) {
-          previous.items.push(...turn.items);
-          previous.status = turn.status;
-          previous.error = turn.error;
-          previous.completedAt = turn.completedAt;
-        } else merged.push(turn);
+    // A long history is projected again from its last turn as it grows; mappings can change any turn.
+    const previous = this.projections.get(threadId);
+    const current = previous?.metaRevision === this.metaRevision ? previous : undefined;
+    const projection = this.history.projectHistory(entries, { leafId, entryMappings: this.meta.entries, cwd: rpc?.cwd ?? this.catalog.get(threadId)?.cwd, senderThreadId: threadId, previous: current?.projection });
+    let merged = current?.projection === projection && current.activeId === active?.turn.id ? current.merged : undefined;
+    if (!merged) {
+      // Projected turns stay shared with later projections, and these with later reads: Remote's IDs are applied to copies.
+      merged = [];
+      for (const projected of projection.turns) {
+        const items = projected.items.map(item => {
+          const mapping = this.meta.entries[item.id];
+          const clientId = item.type === 'userMessage' && mapping?.clientId ? mapping.clientId : item.clientId;
+          return (mapping?.itemId ?? item.id) === item.id && clientId === item.clientId ? item : { ...item, id: mapping?.itemId ?? item.id, ...(item.type === 'userMessage' ? { clientId } : {}) };
+        });
+        const id = this.meta.entries[projected.id]?.turnId ?? projected.id;
+        const status = projected.status === 'inProgress' && id !== active?.turn.id ? 'interrupted' : projected.status;
+        const last = merged.at(-1);
+        if (last?.id === id) Object.assign(last, { items: [...last.items, ...items], status, error: projected.error, completedAt: projected.completedAt });
+        else merged.push({ ...projected, id, items, status });
       }
-      for (const turn of merged) {
-        if (turn.status === 'inProgress' && turn.id !== active?.turn.id) turn.status = 'interrupted';
-      }
-      cached = { entries, leafId, metaRevision: this.metaRevision, activeId: active?.turn.id, merged };
-      this.turnCache.delete(threadId);
-      this.turnCache.set(threadId, cached);
-      if (this.turnCache.size > 16) this.turnCache.delete(this.turnCache.keys().next().value);
     }
-    const merged = structuredClone(cached.merged);
+    this.projections.delete(threadId);
+    this.projections.set(threadId, { projection, metaRevision: this.metaRevision, activeId: active?.turn.id, merged });
+    if (this.projections.size > 16) this.projections.delete(this.projections.keys().next().value);
+    merged = [...merged];
     if (active) {
-      const current = merged.find(turn => turn.id === active.turn.id);
-      const items = new Map([...(current?.items ?? []), ...active.turn.items].map(item => [item.id, item]));
-      const live = structuredClone({ ...active.turn, items: [...items.values()], status: 'inProgress', error: null, completedAt: null, durationMs: null });
-      if (current) Object.assign(current, live);
-      else merged.push(live);
+      const index = merged.findIndex(turn => turn.id === active.turn.id);
+      const items = new Map([...(merged[index]?.items ?? []), ...active.turn.items].map(item => [item.id, item]));
+      const live = structuredClone({ ...merged[index], ...active.turn, items: [...items.values()], status: 'inProgress', error: null, completedAt: null, durationMs: null });
+      if (index === -1) merged.push(live);
+      else merged[index] = live;
     }
     return merged;
   }
@@ -512,6 +510,12 @@ export class Protocol {
     }
   }
 
+  // Pi's settings, models and extensions differ by directory only through its `.pi` there: without one in either, the default probe answers.
+  async settingsProbe(cwd = this.cwd) {
+    const own = path => stat(join(resolve(path), '.pi')).then(() => true, () => false);
+    return this.probeRpc((await own(cwd)) || (await own(this.cwd)) ? cwd : this.cwd);
+  }
+
   async probeRpc(cwd = this.cwd) {
     cwd = resolve(cwd);
     let opening = this.probes.get(cwd);
@@ -522,6 +526,8 @@ export class Protocol {
     this.probeUsed.set(cwd, Date.now());
     try {
       const rpc = await opening;
+      // A probe that took a while to start is as recently used as its caller, who has yet to send to it.
+      this.probeUsed.set(cwd, Date.now());
       if (rpc.failure) {
         if (this.probes.get(cwd) === opening) this.probes.set(cwd, (async () => {
           await rpc.close();
@@ -544,6 +550,7 @@ export class Protocol {
   async close() {
     this.queueClosing = true;
     clearInterval(this.releaseTimer);
+    this.catalogWatcher?.close();
     this.attachments.close();
     this.previews.close();
     for (const processes of this.execProcesses.values()) for (const { kill } of processes.values()) kill();

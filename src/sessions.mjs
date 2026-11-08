@@ -24,8 +24,6 @@ export class RpcSession {
     // Counts persisted messages, so a snapshot shows which of them a turn had already written.
     this.messageEnds = 0;
     this.messageEndsAt = new WeakMap();
-    // Changes whenever Pi's entries may have: an event other than a streamed update, or a command that is not a read.
-    this.revision = 0;
     this.requestTimeoutMs = requestTimeoutMs;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
     this.onState = onState;
@@ -95,7 +93,6 @@ export class RpcSession {
       }
       return;
     }
-    if (!['message_update', 'tool_execution_update', 'bash_execution_update'].includes(record.type)) this.revision++;
     if (record.type === 'message_end' && ['user', 'assistant', 'toolResult', 'custom', 'system'].includes(record.message?.role)) this.messageEnds++;
     if (record.type === 'agent_start') this.state.isStreaming = true;
     if (record.type === 'agent_settled') this.state.isStreaming = false;
@@ -130,8 +127,6 @@ export class RpcSession {
     if (this.failure) throw this.failure;
     if (this.closing) throw new Error('Pi RPC session is closing');
     const id = params.id ?? `remote-${++this.nextId}`;
-    const read = type.startsWith('get_');
-    if (!read) this.revision++;
     const data = await new Promise((resolveRequest, reject) => {
       const timer = setTimeout(() => {
         this.fail(new Error(`Pi RPC ${type} timed out; its action may already have executed`));
@@ -139,7 +134,7 @@ export class RpcSession {
       }, timeoutMs);
       this.pending.set(id, { resolve: resolveRequest, reject, timer });
       this.send({ ...params, id, type }).catch(error => this.fail(error));
-    }).finally(() => { if (!read) this.revision++; });
+    });
     if (type === 'get_state') {
       this.state = data;
       await this.onState(this);

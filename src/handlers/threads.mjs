@@ -33,7 +33,7 @@ export const threadsHandlers = {
     return response;
   },
   async 'thread/list'(params) {
-    if (!params.useStateDbOnly) await this.discover();
+    if (!params.useStateDbOnly) await this.discover({ cached: true });
     const cwds = params.cwd ? new Set(Array.isArray(params.cwd) ? params.cwd : [params.cwd]) : null;
     const records = [...this.catalog.values()].filter(record => Boolean(this.meta.archives[record.id]) === Boolean(params.archived) && (!cwds || cwds.has(record.cwd)) && (!params.searchTerm || `${record.name ?? ''} ${record.firstMessage ?? ''}`.toLowerCase().includes(params.searchTerm.toLowerCase())));
     if (params.parentThreadId && params.ancestorThreadId) throw invalid('parentThreadId and ancestorThreadId cannot be combined.');
@@ -76,7 +76,6 @@ export const threadsHandlers = {
     return { ...page, nextCursor: page.nextCursor ? 'after:' + page.data.at(-1).id : null, data: await Promise.all(page.data.map(record => this.thread(record.id))), backwardsCursor: page.data.length ? 'at:' + page.data[0].id : null };
   },
   async 'thread/read'(params, emit) {
-    await this.discover();
     this.subscribe(params.threadId, emit);
     return { thread: await this.thread(params.threadId, params.includeTurns) };
   },
@@ -98,7 +97,7 @@ export const threadsHandlers = {
     const effort = executionSettings(settings);
     if (params.history != null) throw invalid('History overrides are unsupported; resume by threadId.');
     if (params.path != null && typeof params.path !== 'string') throw invalid('Resume path must be a string.');
-    await this.discover();
+    if (!this.catalog.has(params.threadId)) await this.discover();
     if (params.path) {
       const record = this.catalog.get(params.threadId);
       if (!record) throw invalid('Thread not found.');
@@ -108,7 +107,6 @@ export const threadsHandlers = {
     }
     let readOnly = this.catalog.get(params.threadId)?.isSubAgent || !this.meta.owned?.[params.threadId];
     if (!readOnly && !this.loaded.has(params.threadId) && !this.sessions.hosted) {
-      await this.discover();
       const record = this.catalog.get(params.threadId);
       if (record && !this.meta.trashed?.[params.threadId]) {
         try { await this.trash.assertSessionNotOpen(record.path); }
@@ -117,11 +115,10 @@ export const threadsHandlers = {
     }
     // Viewing an unloaded thread reads its history without opening the session; sending opens it.
     if (readOnly || !this.loaded.has(params.threadId)) {
-      await this.discover();
       const record = this.catalog.get(params.threadId);
       if (!record) throw invalid('Thread not found.');
       workspaceSettings(params, record.cwd);
-      const { header, entries } = await this.history.readHistory(record.path);
+      const { header, entries } = await (this.history.loadSession ?? this.history.readHistory)(record.path);
       if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can resume it.');
       if (header.id !== params.threadId) throw invalid('Session history identity changed. Refresh the list before resuming.');
       this.inputEligibility.set(params.threadId, false);
@@ -134,7 +131,7 @@ export const threadsHandlers = {
         } catch { /* Read-only history remains available when acquisition is unsafe. */ }
       }
       const saved = sessionSettings(entries);
-      const probe = await this.probeRpc(record.cwd);
+      const probe = await this.settingsProbe(record.cwd);
       providerSettings(params, { state: { model: saved.model ?? probe.state.model } });
       const model = modelKey(saved.model ?? probe.state.model);
       const thinkingLevel = saved.thinkingLevel ?? probe.state.thinkingLevel;
@@ -165,7 +162,6 @@ export const threadsHandlers = {
   async 'thread/settings/update'(params, emit) { return this.updateThreadSettings(params, emit); },
   async 'thread/loaded/list'(params) { return offsetPage([...this.loaded.keys()], params, Math.max(this.loaded.size, 1)); },
   async 'thread/turns/list'(params) {
-    await this.discover({ maxAge: 5000 });
     await this.thread(params.threadId);
     const turns = await this.turns(params.threadId);
     if (params.sortDirection !== 'asc') turns.reverse();
@@ -174,7 +170,6 @@ export const threadsHandlers = {
     return page;
   },
   async 'thread/items/list'(params) {
-    await this.discover({ maxAge: 5000 });
     await this.thread(params.threadId);
     const turns = await this.turns(params.threadId);
     if (params.turnId && !turns.some(turn => turn.id === params.turnId)) throw invalid('Turn not found.');
@@ -580,7 +575,7 @@ export const threadsMethods = {
     this.inputEligibility.delete(id);
     const hosted = this.sessions.hosted;
     if (!hosted) await this.trash.assertSessionNotOpen(record.path);
-    const probe = await this.probeRpc(record.cwd);
+    const probe = await this.settingsProbe(record.cwd);
     const saved = sessionSettings(entries);
     const identity = params.model ? modelIdentity(params.model) : saved.model ?? probe.state.model;
     const { models } = await probe.request('get_available_models');

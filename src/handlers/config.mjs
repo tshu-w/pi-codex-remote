@@ -17,7 +17,7 @@ export const configHandlers = {
   async 'getAuthStatus'() { return { authMethod: null, authToken: null, requiresOpenaiAuth: false }; },
   async 'modelProvider/capabilities/read'() { return { imageGeneration: false, namespaceTools: false, webSearch: false }; },
   async 'config/read'(params) {
-    const rpc = await this.probeRpc(params.cwd ?? this.cwd);
+    const rpc = await this.settingsProbe(params.cwd ?? this.cwd);
     await rpc.refresh();
     return {
       config: {

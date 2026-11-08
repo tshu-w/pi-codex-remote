@@ -30,13 +30,16 @@ class HostedRpc {
     this.emit({ type: 'message_end', message });
     this.entries.push({ type: 'message', id, parentId: this.entries.at(-1)?.id ?? null, timestamp: new Date().toISOString(), message });
   }
-  async request(type) {
-    this.requests.push(type);
+  async request(type, params = {}) {
+    this.requests.push(params.since === undefined ? type : `${type} since ${params.since}`);
     // Pi answers after the events already in flight, as through pd's relay.
     await tick();
     if (type === 'get_state') return structuredClone(this.state);
     if (type === 'get_entries') {
-      const data = { entries: structuredClone(this.entries), leafId: this.entries.at(-1)?.id ?? null };
+      // As Pi: the entries after `since`, and the leaf, which navigating the tree moves.
+      const index = params.since === undefined ? -1 : this.entries.findIndex(entry => entry.id === params.since);
+      if (params.since !== undefined && index === -1) throw new Error(`Entry not found: ${params.since}`);
+      const data = { entries: structuredClone(this.entries.slice(index + 1)), leafId: this.leafId ?? this.entries.at(-1)?.id ?? null };
       this.messageEndsAt.set(data, this.messageEnds);
       return data;
     }
@@ -183,19 +186,25 @@ test('a thread lists its running Agents and the 20 last active, and opens any ot
   assert.equal((await client.request('thread/resume', { threadId: hidden })).thread.id, hidden);
 });
 
-test('pages of a history reuse its entries until Pi reports a change', async t => {
+test('a history is read again from its last known entry, and in full on another branch or session', async t => {
   const { rpc, client, id } = await setup(t);
-  rpc.revision = 0;
-  const user = (entryId, text) => rpc.entries.push({ type: 'message', id: entryId, parentId: rpc.entries.at(-1)?.id ?? null, timestamp: new Date().toISOString(), message: { role: 'user', content: text, timestamp: Date.now() } });
-  const list = async () => (await client.request('thread/turns/list', { threadId: id, itemsView: 'full' })).data.flatMap(turn => turn.items.map(item => item.id));
-  user('u1', 'first');
-  assert.deepEqual(await list(), ['u1']);
-  const reads = rpc.requests.filter(type => type === 'get_entries').length;
-  user('u2', 'second');
-  assert.deepEqual(await list(), ['u1']);
-  assert.equal(rpc.requests.filter(type => type === 'get_entries').length, reads);
-  rpc.revision++;
-  assert.deepEqual(await list(), ['u1', 'u2']);
+  const message = (entryId, parentId, role) => rpc.entries.push({ type: 'message', id: entryId, parentId, timestamp: new Date().toISOString(),
+    message: role === 'user' ? { role, content: entryId, timestamp: Date.now() } : { role, content: [{ type: 'text', text: entryId }], stopReason: 'stop', timestamp: Date.now() } });
+  const list = async () => (await client.request('thread/turns/list', { threadId: id, itemsView: 'full', sortDirection: 'asc' })).data.map(turn => turn.items.map(item => item.id));
+  message('u1', null, 'user'); message('a1', 'u1', 'assistant');
+  assert.deepEqual(await list(), [['u1', 'a1:0']]);
+  message('u2', 'a1', 'user'); message('a2', 'u2', 'assistant');
+  rpc.requests.length = 0;
+  assert.deepEqual(await list(), [['u1', 'a1:0'], ['u2', 'a2:0']]);
+  assert.deepEqual(rpc.requests.filter(request => request.startsWith('get_entries')), ['get_entries since a1']);
+  // Navigating the tree to the first turn and continuing there replaces the later turns.
+  rpc.leafId = 'a3'; message('u3', 'a1', 'user'); message('a3', 'u3', 'assistant');
+  assert.deepEqual(await list(), [['u1', 'a1:0'], ['u3', 'a3:0']]);
+  // Another session has none of the entries known.
+  rpc.entries = []; rpc.leafId = undefined; message('n1', null, 'user');
+  rpc.requests.length = 0;
+  assert.deepEqual(await list(), [['n1']]);
+  assert.deepEqual(rpc.requests.filter(request => request.startsWith('get_entries')), ['get_entries since a3', 'get_entries']);
 });
 
 test('Remote steers and interrupts a terminal turn without clearing Pi\'s queue', async t => {

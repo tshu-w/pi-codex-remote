@@ -1,4 +1,5 @@
-import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { open, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { realpathSync, watch } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { noticeItems, toolItem, updateToolItem } from './items.mjs';
@@ -13,6 +14,8 @@ function boundedCache(maxEntries, maxBytes) {
     if (entry) { bytes -= entry.bytes; entries.delete(key); }
   }
   return {
+    // The value whatever its version, to extend.
+    peek(key) { return entries.get(key)?.value; },
     get(key, version) {
       const entry = entries.get(key);
       if (!entry) return;
@@ -32,7 +35,7 @@ function boundedCache(maxEntries, maxBytes) {
   };
 }
 
-const histories = boundedCache(128, 16 * 1024 * 1024);
+const histories = boundedCache(128, 64 * 1024 * 1024);
 const summaries = boundedCache(2048, 4 * 1024 * 1024);
 const searchTexts = boundedCache(2048, 8 * 1024 * 1024);
 
@@ -53,6 +56,12 @@ export async function historyPath(file) {
   catch (error) { if (error.code === 'ENOENT') return absolute; throw error; }
 }
 
+// The cached history, shared: callers must not change it.
+export async function loadSession(sessionFile) {
+  const path = resolve(sessionFile);
+  return (await loadHistory(path, await stat(path))).history;
+}
+
 export async function readHistory(sessionFile) {
   const path = resolve(sessionFile);
   const { history } = await loadHistory(path, await stat(path));
@@ -71,27 +80,62 @@ export async function readSearchText(sessionFile) {
   return text;
 }
 
-async function loadHistory(sessionFile, metadata) {
-  const version = fileVersion(metadata);
-  const cached = histories.get(sessionFile, version);
-  if (cached) return { history: cached, cacheable: true };
-  const text = await readFile(sessionFile, 'utf8');
-  let complete = true;
+function parseLines(text, sessionFile, firstLine) {
   const lines = text.split('\n');
   const records = [];
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].trim()) continue;
     try { records.push(JSON.parse(lines[i])); }
     catch (error) {
-      if (i === lines.length - 1 && !text.endsWith('\n')) { complete = false; break; }
-      throw new Error(`Invalid Pi history at ${sessionFile}:${i + 1}: ${error.message}`);
+      if (i === lines.length - 1 && !text.endsWith('\n')) return { records, complete: false };
+      throw new Error(`Invalid Pi history at ${sessionFile}:${firstLine + i}: ${error.message}`);
     }
   }
-  const header = records.shift();
-  if (header?.type !== 'session' || !header.id) throw new Error(`Invalid Pi session header: ${sessionFile}`);
-  const history = { header, entries: records };
+  // A line still being written ends without a newline; the file is read again once it has one.
+  return { records, complete: !text || text.endsWith('\n') };
+}
+
+// Pi appends to a session file; a file that grew is read from where it ended, and one rewritten or moved is read again.
+async function loadHistory(sessionFile, metadata) {
+  const version = fileVersion(metadata);
+  const previous = histories.peek(sessionFile);
+  const cached = histories.get(sessionFile, version);
+  if (cached) return { history: cached.history, cacheable: true };
+  let history;
+  let complete;
+  let lines;
+  let appended;
+  if (previous && previous.dev === metadata.dev && previous.ino === metadata.ino && metadata.size > previous.size) {
+    // The bytes it ended with, read again, tell an append from a rewrite of the same file.
+    const start = Math.max(0, previous.size - previous.ending.length);
+    const file = await open(sessionFile, 'r');
+    try {
+      const buffer = Buffer.alloc(metadata.size - start);
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
+      if (buffer.subarray(0, previous.size - start).equals(previous.ending)) appended = buffer.subarray(previous.size - start, bytesRead).toString('utf8');
+    } finally { await file.close(); }
+  }
+  let ending;
+  if (appended !== undefined) {
+    const text = appended;
+    const parsed = parseLines(text, sessionFile, previous.lines + 1);
+    ({ complete } = parsed);
+    lines = previous.lines + text.split('\n').length - 1;
+    history = { header: previous.history.header, entries: previous.history.entries.concat(parsed.records) };
+    ending = Buffer.concat([previous.ending, Buffer.from(text)]).subarray(-64);
+  } else {
+    const buffer = await readFile(sessionFile);
+    ending = buffer.subarray(Math.max(0, buffer.length - 64));
+    const text = buffer.toString('utf8');
+    const parsed = parseLines(text, sessionFile, 1);
+    ({ complete } = parsed);
+    lines = text.split('\n').length - 1;
+    const header = parsed.records.shift();
+    if (header?.type !== 'session' || !header.id) throw new Error(`Invalid Pi session header: ${sessionFile}`);
+    history = { header, entries: parsed.records };
+  }
   const cacheable = complete && version === fileVersion(await stat(sessionFile));
-  if (cacheable) histories.set(sessionFile, version, history, text.length * 2 + records.length * 256);
+  if (cacheable) histories.set(sessionFile, version, { history, dev: metadata.dev, ino: metadata.ino, size: metadata.size, lines, ending }, metadata.size * 2 + history.entries.length * 256);
   return { history, cacheable };
 }
 
@@ -118,8 +162,22 @@ export function sessionSettings(entries) {
   };
 }
 
+const sessionRoot = () => process.env.PI_CODING_AGENT_SESSION_DIR || join(agentDir(), 'sessions');
+
+// Calls `onChange` when a session file is added, written, moved or removed, or a directory of them is moved;
+// `onClose` when that can no longer be told. Other files there, such as logs, do not count.
+export function watchSessions(onChange, onClose) {
+  try {
+    const watcher = watch(realpathSync(sessionRoot()), { recursive: true, persistent: false }, (type, file) => {
+      if (file == null || file.endsWith('.jsonl') || (type === 'rename' && !basename(file).includes('.'))) onChange();
+    });
+    watcher.on('error', () => { watcher.close(); onClose(); });
+    return watcher;
+  } catch { return null; }
+}
+
 export async function listSessions({ cwd } = {}) {
-  const root = process.env.PI_CODING_AGENT_SESSION_DIR || join(agentDir(), 'sessions');
+  const root = sessionRoot();
   const files = [];
   async function collect(dir) {
     let children;
@@ -226,11 +284,24 @@ export function runningAgents(entries) {
   return new Set([...inputs].filter(([, states]) => [...states.values()].some(state => ['queued', 'running'].includes(state))).map(([id]) => id));
 }
 
-export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = {}, cwd = '', senderThreadId, imageMapper = block => ({ type: 'image', url: `data:${block.mimeType};base64,${block.data}` }) } = {}) {
-  const turns = [];
+export const projectTurns = (entries, options) => projectHistory(entries, options).turns;
+
+// `previous`, a projection of the same session with the same options, is extended: while its branch only grows,
+// the turns before its last are final and only the last is projected again, from the entry that began it.
+export function projectHistory(entries, options = {}) {
+  const { leafId, clientIds = {}, entryMappings = {}, cwd = '', senderThreadId, imageMapper = block => ({ type: 'image', url: `data:${block.mimeType};base64,${block.data}` }), previous } = options;
+  const branch = activeBranch(entries, leafId);
+  const agents = sessionAgents(branch);
+  // The same entry objects tell an extended history from one reread or rewritten; a new Agent record can name the Agent of an earlier notice.
+  const resume = previous?.branch?.length > 0 && previous.agents === agents.length && previous.branch.length <= branch.length
+    && branch[previous.branch.length - 1] === previous.branch.at(-1);
+  if (resume && previous.branch.length === branch.length) return previous;
+  const turns = resume ? previous.turns.slice(0, previous.frozen) : [];
+  const final = turns.length;
+  let start = resume ? previous.start : 0;
   let turn;
   const tools = new Map();
-  const inputs = new Map();
+  const inputs = resume ? previous.inputs : new Map();
   let unphased = [];
   // A turn has ended once Pi's run stops; until then steered input joins it.
   let ended = false;
@@ -241,16 +312,17 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
     unphased.forEach(({ item, toolUse }, index) => { item.phase = toolUse || index < unphased.length - 1 ? 'commentary' : 'final_answer'; });
     unphased = [];
   };
-  const branch = activeBranch(entries, leafId);
-  const agents = sessionAgents(branch);
   const nestedItems = new Map(branch.filter(entry => entry.type === 'custom' && entry.customType === 'codex-remote-tool')
     .map(entry => [entry.data.item.id, entry.data]));
-  for (const entry of branch) {
+  for (let index = start; index < branch.length; index++) {
+    const entry = branch[index];
     if (entry.type === 'custom' && entry.customType === 'codex-remote-tool') {
       const saved = entry.data;
       let parent = saved.parentToolCallId;
       while (nestedItems.has(parent)) parent = nestedItems.get(parent).parentToolCallId;
       const owner = [...turns, turn].find(candidate => candidate?.items.some(item => item.id === parent));
+      // A nested call recorded after its turn changes a turn taken as final.
+      if (resume && turns.indexOf(owner) !== -1 && turns.indexOf(owner) < final) return projectHistory(entries, { ...options, previous: undefined });
       if (owner && !owner.items.some(item => item.id === saved.item.id)) {
         const item = structuredClone(saved.item);
         owner.items.push(item);
@@ -276,6 +348,7 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
       ended = role !== 'user' && !notice;
       notices = notice;
       if (turn?.items.length) turns.push(turn);
+      start = index;
       tools.clear();
       turn = {
         id: entry.id, items: [], itemsView: 'full', status: 'completed', error: null,
@@ -342,6 +415,7 @@ export function projectTurns(entries, { leafId, clientIds = {}, entryMappings = 
     turn.durationMs = (turn.completedAt - turn.startedAt) * 1000;
   }
   settle();
+  const frozen = turns.length;
   if (turn?.items.length) turns.push(turn);
-  return turns;
+  return { turns, branch, start, frozen, inputs, agents: agents.length };
 }

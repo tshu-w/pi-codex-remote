@@ -120,7 +120,7 @@ export const turnsMethods = {
     active.inputs = Promise.resolve();
     this.active.set(params.threadId, active);
     try {
-      const { entries } = await rpc.request('get_entries');
+      const { entries } = await this.rpcEntries(rpc);
       this.rememberAgents(rpc, entries);
       active.priorEntries = new Set(entries.map(entry => entry.id));
       this.notify(rpc.id, 'thread/status/changed', { threadId: rpc.id, status: { type: 'active', activeFlags: [] } });
@@ -130,7 +130,7 @@ export const turnsMethods = {
       active.accept(true);
       if (response?.disposition === 'handled') await this.finish(active);
       else if (!active.finished) {
-        const { entries } = await rpc.request('get_entries');
+        const { entries } = await this.rpcEntries(rpc);
         this.recordUsers(active, entries);
         await this.saveMetadata();
       }
@@ -143,6 +143,35 @@ export const turnsMethods = {
       else this.finishNotification(active);
       throw error;
     }
+  },
+
+  // Pi's entries only grow while its session stays the same, so each read asks for those after the last one known.
+  // Reads of one Pi are serialized, so each extends the entries the previous one returned.
+  rpcEntries(rpc) {
+    const read = (this.entryReads.get(rpc) ?? Promise.resolve()).catch(() => {}).then(async () => {
+      const known = rpc.knownEntries;
+      const since = known?.entries.at(-1)?.id;
+      const tail = since === undefined ? undefined : await rpc.request('get_entries', { since }).catch(error => {
+        // A switched session or another branch file no longer has it.
+        if (/Entry not found/.test(error.message)) return undefined;
+        throw error;
+      });
+      let result;
+      // A Pi that ignores `since` returns them all.
+      if (tail && !known.ids.has(tail.entries[0]?.id)) {
+        for (const entry of tail.entries) known.ids.add(entry.id);
+        result = { entries: tail.entries.length ? known.entries.concat(tail.entries) : known.entries, leafId: tail.leafId };
+        rpc.messageEndsAt?.set(result, rpc.messageEndsAt.get(tail));
+      } else {
+        result = tail ?? await rpc.request('get_entries');
+        rpc.knownEntries = { entries: result.entries, ids: new Set(result.entries.map(entry => entry.id)) };
+        return result;
+      }
+      rpc.knownEntries = { entries: result.entries, ids: known.ids };
+      return result;
+    });
+    this.entryReads.set(rpc, read);
+    return read;
   },
 
   rememberAgents(rpc, entries) {
@@ -246,7 +275,7 @@ export const turnsMethods = {
     Object.assign(active, { external: true, messageIndex: -1 });
     const started = rpc.messageEnds;
     // Messages this turn ended before the snapshot are already in it; they are the last ones written.
-    active.inputs = rpc.request('get_entries').then(snapshot => {
+    active.inputs = this.rpcEntries(rpc).then(snapshot => {
       this.rememberAgents(rpc, snapshot.entries);
       const written = rpc.messageEndsAt.get(snapshot) - started;
       const messages = snapshot.entries.filter(entry => ['message', 'custom_message'].includes(entry.type));
@@ -259,7 +288,7 @@ export const turnsMethods = {
   // Joining a host mid-turn continues the turn its history already shows.
   async joinExternalTurn(rpc) {
     if (!this.sessions.hosted || !rpc.state.isStreaming || this.active.has(rpc.id)) return;
-    const { entries, leafId } = await rpc.request('get_entries');
+    const { entries, leafId } = await this.rpcEntries(rpc);
     this.rememberAgents(rpc, entries);
     // Events before the snapshot had no turn to join; history shows them.
     if (!rpc.state.isStreaming || this.active.has(rpc.id)) return;
@@ -297,7 +326,7 @@ export const turnsMethods = {
     const { rpc } = active;
     const id = `shell-${item.id}`;
     const started = Date.now();
-    if (ownsTurn) active.priorEntries = new Set((await rpc.request('get_entries')).entries.map(entry => entry.id));
+    if (ownsTurn) active.priorEntries = new Set((await this.rpcEntries(rpc)).entries.map(entry => entry.id));
     const unsubscribe = rpc.onEvent(event => {
       if (event.type !== 'bash_execution_update' || event.id !== id) return;
       item.aggregatedOutput = (item.aggregatedOutput ?? '') + event.delta;
@@ -334,7 +363,7 @@ export const turnsMethods = {
   },
 
   async persistCompaction(active, item, result) {
-    const { entries } = await active.rpc.request('get_entries');
+    const { entries } = await this.rpcEntries(active.rpc);
     this.mapCompaction(active, item, result, entries);
     if (!Object.values(this.meta.entries).some(value => value.itemId === item.id)) throw new Error('Completed Pi compaction has no new persisted entry.');
     await this.saveMetadata();
@@ -359,7 +388,7 @@ export const turnsMethods = {
     }
     // Inputs to owned Agents start with their spawn or send and end with their result.
     if ((event.type === 'tool_execution_end' && event.toolName === 'agent') || (event.type === 'message_end' && event.message.customType === 'pi-agents')) {
-      void rpc.request('get_entries').then(({ entries }) => { if (this.loaded.get(rpc.id) === rpc) this.rememberAgents(rpc, entries); }, () => {});
+      void this.rpcEntries(rpc).then(({ entries }) => { if (this.loaded.get(rpc.id) === rpc) this.rememberAgents(rpc, entries); }, () => {});
     }
     if (event.type === 'request_failed') {
       if (active) this.reconcileTurn(active);
@@ -432,7 +461,7 @@ export const turnsMethods = {
       };
       // An Agent Remote does not know yet is in the entries, so live shows what history will.
       if (noticeItems('', event.message, { agents: rpc.agents })[0].type !== 'agentMessage' || !event.message.details?.results?.length) show();
-      else active.inputs = active.inputs.then(() => rpc.request('get_entries')).then(({ entries }) => this.rememberAgents(rpc, entries), () => {}).then(show);
+      else active.inputs = active.inputs.then(() => this.rpcEntries(rpc)).then(({ entries }) => this.rememberAgents(rpc, entries), () => {}).then(show);
     } else if (event.type === 'message_update') {
       const update = event.assistantMessageEvent;
       const thinking = update.type.startsWith('thinking_');
@@ -546,7 +575,7 @@ export const turnsMethods = {
       await active.rpc.refresh();
       if (active.rpc.state.isStreaming) return;
       if (active.priorEntries) {
-        const { entries } = await active.rpc.request('get_entries');
+        const { entries } = await this.rpcEntries(active.rpc);
         this.recordUsers(active, entries);
         await this.saveMetadata();
       }

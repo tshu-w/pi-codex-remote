@@ -4,7 +4,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { listSessions, readHistory, readSearchText } from '../src/history.mjs';
+import { listSessions, loadSession, projectHistory, readHistory, readSearchText } from '../src/history.mjs';
 
 const header = { type: 'session', id: 'session', cwd: '/project', timestamp: '2026-01-01T00:00:00Z' };
 const message = (text, id = 'user', parentId = null) => ({ type: 'message', id, parentId, message: { role: 'user', content: text } });
@@ -96,7 +96,7 @@ test('compact search survives history LRU eviction and oversized images bypass t
   assert.equal(f.reads(), 130, 'list plus repeated search stays warm beyond history entry capacity');
 
   const file = join(f.root, 'large.jsonl');
-  const image = 'a'.repeat(9 * 1024 * 1024);
+  const image = 'a'.repeat(33 * 1024 * 1024);
   await fs.writeFile(file, jsonl(header, message([{ type: 'text', text: 'caption' }, { type: 'image', mimeType: 'image/png', data: image }])));
   assert.equal((await readHistory(file)).entries[0].message.content[1].data, image);
   const before = f.reads();
@@ -105,4 +105,27 @@ test('compact search survives history LRU eviction and oversized images bypass t
   assert.equal(await readSearchText(file), 'caption');
   assert.equal(await readSearchText(file), 'caption');
   assert.equal(f.reads(), before + 2, 'compact search remains cached without the image');
+});
+
+test('a grown session is read from where it ended, and a rewritten one in full, with its turns projected again', async t => {
+  const f = await fixture(t);
+  const file = join(f.root, 'session.jsonl');
+  const reply = (text, id, parentId) => ({ type: 'message', id, parentId, message: { role: 'assistant', content: [{ type: 'text', text }], stopReason: 'stop' } });
+  await fs.writeFile(file, jsonl(header, message('first'), reply('one', 'a1', 'user'), message('second', 'u2', 'a1')));
+  const first = await loadSession(file);
+  const projected = projectHistory(first.entries);
+  await fs.appendFile(file, jsonl(reply('two', 'a2', 'u2')));
+  const reads = f.reads();
+  const grown = await loadSession(file);
+  assert.equal(f.reads(), reads, 'an append is read alone');
+  assert.equal(grown.entries[0], first.entries[0]);
+  const extended = projectHistory(grown.entries, { previous: projected });
+  assert.equal(extended.turns[0], projected.turns[0], 'turns before the last are kept');
+  assert.notEqual(extended.turns[1], projected.turns[1]);
+  assert.deepEqual(extended.turns, projectHistory(grown.entries).turns);
+  // Rewriting a session, as slimming it does, can keep its entry IDs and change their content.
+  await fs.writeFile(file, jsonl(header, message('first, rewritten'), reply('one', 'a1', 'user'), message('second', 'u2', 'a1'), reply('two', 'a2', 'u2'), message('third', 'u3', 'a2')));
+  const rewritten = await loadSession(file);
+  assert.equal(f.reads(), reads + 1);
+  assert.equal(projectHistory(rewritten.entries, { previous: extended }).turns[0].items[0].content[0].text, 'first, rewritten');
 });
