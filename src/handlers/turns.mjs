@@ -451,16 +451,16 @@ export const turnsMethods = {
       this.completeItem(active, this.startItem(active, item));
     } else if (event.type === 'message_end' && event.message.role === 'custom' && event.message.display) {
       // Entries record each Agent a session starts; Remote knows those it has read or seen start.
-      // IDs are fixed on arrival, so history read before the items are shown maps to them: a result has at most two items.
+      // IDs are fixed on arrival, so history read before the items are shown maps to them: a notice has an item per result.
       const id = randomUUID();
-      const notice = { id, ids: [id, ...Array.from({ length: 2 * (event.message.details?.results?.length ?? 0) - 1 }, (_, index) => `${id}:${index + 1}`)] };
+      const notice = { id, ids: [id, ...Array.from({ length: (event.message.details?.results?.length ?? 0) - 1 }, (_, index) => `${id}:${index + 1}`)] };
       (active.notices ??= []).push(notice);
       const show = () => {
         const items = noticeItems(id, event.message, { cwd: rpc.cwd, agents: rpc.agents });
         for (const item of items) this.completeItem(active, this.startItem(active, item));
       };
       // An Agent Remote does not know yet is in the entries, so live shows what history will.
-      if (noticeItems('', event.message, { agents: rpc.agents })[0].type !== 'agentMessage' || !event.message.details?.results?.length) show();
+      if (noticeItems('', event.message, { agents: rpc.agents })[0]?.type !== 'agentMessage' || !event.message.details?.results?.length) show();
       else active.inputs = active.inputs.then(() => this.rpcEntries(rpc)).then(({ entries }) => this.rememberAgents(rpc, entries), () => {}).then(show);
     } else if (event.type === 'message_update') {
       const update = event.assistantMessageEvent;

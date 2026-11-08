@@ -51,19 +51,21 @@ test('notices join a running turn and open their own turn after an answer', () =
     bashResult('n1', 'completed', 'ok\n'), assistant('a2', 'stop', [text('answer')]),
     results('n2', ['a', 'completed', 'done']), results('n3', ['b', 'completed', 'done']),
     assistant('a3', 'stop', [text('reported')]),
-    notice('n4', '<agent-message name="a" id="0a">\nhi\n</agent-message>'),
-    user('u2', 'next'), assistant('a4', 'stop', [text('done')]),
+    // Messages from other Agents show nothing: the reply one prompts is its turn, and one without a reply leaves none.
+    notice('n4', '<agent-message name="a" id="0a" note="Reply with send">\nhi\n</agent-message>', 'pi-agents', { delivery: 'followUp', sender: { id: '0a', name: 'a' } }),
+    assistant('a4', 'stop', [text('replied')]),
+    notice('n5', '<agent-message name="a" id="0a">\nbye\n</agent-message>', 'pi-agents', { delivery: 'write', sender: { id: '0a', name: 'a' } }),
+    user('u2', 'next'), assistant('a5', 'stop', [text('done')]),
   ]));
   assert.deepEqual(view(turns), [
     ['u1', 'completed', ['u1', 'c1', 'n1', 'a2:0:final_answer']],
-    ['n2', 'completed', ['n2', 'n2:1', 'n3', 'n3:1', 'a3:0:final_answer']],
-    // A notice delivered while idle without a run still precedes the next prompt's turn.
-    ['n4', 'completed', ['n4:commentary']],
-    ['u2', 'completed', ['u2', 'a4:0:final_answer']],
+    ['n2', 'completed', ['n2', 'n3', 'a3:0:final_answer']],
+    ['n4', 'completed', ['a4:0:final_answer']],
+    ['u2', 'completed', ['u2', 'a5:0:final_answer']],
   ]);
 });
 
-test('notices show as the steps they report, or as a header and their body', () => {
+test('notices show as the steps they report, as a header and their body, or not at all', () => {
   const turns = projectTurns(chain([
     spawned('a'), spawned('b'), user('u1', 'go'), assistant('a1', 'toolUse', [call('c1')]), result('c1'),
     bashResult('n1', 'completed', 'ok\n'), bashResult('n2', 'failed', 'oops\n\nCommand exited with code 2'),
@@ -71,7 +73,6 @@ test('notices show as the steps they report, or as a header and their body', () 
     // Without a record of the Agent, the result reads as text.
     results('n4', ['c', 'completed', 'third']),
     notice('n5', '<agent-message name="a" id="0a" note="Reply with send">\nhi\n</agent-message>', 'pi-agents', { delivery: 'followUp', sender: { id: '0a', name: 'a' } }),
-    // Without its details, a message reads as text.
     notice('n7', '<agent-message name="a" id="0a">\nbye\n</agent-message>'),
     notice('n6', [text('Ran `/program x`'), { type: 'image', mimeType: 'image/png', data: 'AA==' }], 'pi-agents-program'),
   ]), { cwd: '/work' });
@@ -82,20 +83,15 @@ test('notices show as the steps they report, or as a header and their body', () 
     { type: 'commandExecution', id: 'n2', command: 'make\ncheck', cwd: '/work', commandActions: [], aggregatedOutput: 'oops\n\nCommand exited with code 2',
       durationMs: 2000, exitCode: 2, processId: null, pluginId: null, scriptPath: null, source: 'agent', status: 'failed' },
   ]);
-  const step = (id, name, status, body) => ({ type: 'dynamicToolCall', id, tool: 'agent', namespace: null, arguments: { action: 'result', target: name, status },
-    contentItems: [{ type: 'inputText', text: body }], durationMs: null, status: status === 'completed' ? 'completed' : 'failed', success: status === 'completed' });
-  assert.deepEqual(items.slice(2, 6), [
+  // Each result is its Agent's completion, opening the Agent's thread with the result.
+  assert.deepEqual(items.slice(2, 4), [
     { type: 'subAgentActivity', id: 'n3', kind: 'completed', agentThreadId: '0a-full', agentPath: 'a', model: null, reasoningEffort: null },
-    step('n3:1', 'a', 'completed', '**first**'),
-    { type: 'subAgentActivity', id: 'n3:2', kind: 'interrupted', agentThreadId: '0b-full', agentPath: 'b', model: null, reasoningEffort: null },
-    step('n3:3', 'b', 'aborted', 'second'),
+    { type: 'subAgentActivity', id: 'n3:1', kind: 'interrupted', agentThreadId: '0b-full', agentPath: 'b', model: null, reasoningEffort: null },
   ]);
-  assert.deepEqual(items[7], { type: 'dynamicToolCall', id: 'n5', tool: 'agent', namespace: null, arguments: { action: 'message', from: 'a' },
-    contentItems: [{ type: 'inputText', text: 'hi' }], durationMs: null, status: 'completed', success: true });
-  assert.deepEqual(items.filter((_, index) => index !== 7).slice(6).map(item => [item.type, item.phase, item.text]), [
-    ['agentMessage', 'commentary', 'Agent result from **c** (0c): completed\n\nthird'],
-    ['agentMessage', 'commentary', 'Message from **a** (0a)\n\nbye'],
-    ['agentMessage', 'commentary', 'Ran `/program x`'],
+  // Messages from other Agents, n5 and n7, show nothing.
+  assert.deepEqual(items.slice(4).map(item => [item.id, item.type, item.phase, item.text]), [
+    ['n4', 'agentMessage', 'commentary', 'Agent result from **c** (0c): completed\n\nthird'],
+    ['n6', 'agentMessage', 'commentary', 'Ran `/program x`'],
   ]);
 });
 

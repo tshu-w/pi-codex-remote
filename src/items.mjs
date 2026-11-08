@@ -203,29 +203,17 @@ export function noticeItems(id, message, { cwd = '', agents = [] } = {}) {
       source: 'agent', status: details.status === 'completed' ? 'completed' : 'failed',
     }];
   }
-  // A message from another Agent folds as a step with its body.
+  // As Codex keeps messages between Agents in the model's context only, one another Agent sent shows nothing.
   const blocks = typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : message.content ?? [];
-  const body = customType === 'pi-agents' && details?.sender && /^<agent-message [^>\n]*>\n([\s\S]*)\n<\/agent-message>$/.exec(blocks.filter(block => block.type === 'text').map(block => block.text).join('\n'))?.[1];
-  if (typeof body === 'string') return [{
-    type: 'dynamicToolCall', id, tool: 'agent', namespace: null, arguments: { action: 'message', from: details.sender.name ?? details.sender.id },
-    contentItems: [{ type: 'inputText', text: body }, ...blocks.filter(block => block.type === 'image').map(block => ({ type: 'inputImage', imageUrl: `data:${block.mimeType};base64,${block.data}` }))],
-    durationMs: null, status: 'completed', success: true,
-  }];
+  if (customType === 'pi-agents' && /^<agent-message [^>\n]*>\n[\s\S]*\n<\/agent-message>$/.test(blocks.filter(block => block.type === 'text').map(block => block.text).join('\n'))) return [];
   const results = customType === 'pi-agents' && Array.isArray(details?.results) ? details.results : [];
   const resolved = results.map(result => agents.findLast(agent => typeof result.id === 'string' && agent.id.startsWith(result.id) && agent.name === result.name));
   if (!results.length || resolved.some(agent => !agent)) return [{ type: 'agentMessage', id, text: noticeText(message), phase: 'commentary', delivery: null, memoryCitation: null }];
-  return results.flatMap((result, index) => {
-    const completed = result.status === 'completed';
-    const body = [result.body, result.notice].filter(Boolean).join('\n\n');
-    return [{
-      type: 'subAgentActivity', id: index ? `${id}:${2 * index}` : id, kind: completed ? 'completed' : 'interrupted',
-      agentThreadId: resolved[index].id, agentPath: result.name, model: null, reasoningEffort: null,
-    }, {
-      type: 'dynamicToolCall', id: `${id}:${2 * index + 1}`, tool: 'agent', namespace: null,
-      arguments: { action: 'result', target: result.name, status: result.status },
-      contentItems: [{ type: 'inputText', text: body }], durationMs: null, status: completed ? 'completed' : 'failed', success: completed,
-    }];
-  });
+  // As Codex shows an Agent's completion: its name and outcome, opening its thread, where the result is.
+  return results.map((result, index) => ({
+    type: 'subAgentActivity', id: index ? `${id}:${index}` : id, kind: result.status === 'completed' ? 'completed' : 'interrupted',
+    agentThreadId: resolved[index].id, agentPath: result.name, model: null, reasoningEffort: null,
+  }));
 }
 
 // Pi emits cumulative snapshots. A rolling/truncated snapshot is not an append delta;

@@ -113,16 +113,18 @@ test('an Agent result that starts a host turn after an answer shows the Agent co
   for (const read of [true, false]) {
     const { rpc, client, id } = await setup(t);
     const worker = '01a1a515-0000-7000-8000-000000000002';
+    const reviewer = '01a1a516-0000-7000-8000-000000000003';
     rpc.entries.push(
       { type: 'custom', id: 's0', parentId: null, timestamp: new Date().toISOString(), customType: 'pi-agents-agent', data: { id: worker, name: 'worker' } },
-      { type: 'message', id: 'u0', parentId: 's0', timestamp: new Date().toISOString(), message: { role: 'user', content: 'earlier', timestamp: Date.now() } },
+      { type: 'custom', id: 's1', parentId: 's0', timestamp: new Date().toISOString(), customType: 'pi-agents-agent', data: { id: reviewer, name: 'reviewer' } },
+      { type: 'message', id: 'u0', parentId: 's1', timestamp: new Date().toISOString(), message: { role: 'user', content: 'earlier', timestamp: Date.now() } },
       { type: 'message', id: 'a0', parentId: 'u0', timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'answered' }], stopReason: 'stop', timestamp: Date.now() } },
     );
     if (read) await client.request('thread/turns/list', { threadId: id });
     rpc.emit({ type: 'agent_start' });
     const { params: { turn } } = await client.notification('turn/started');
     const message = { role: 'custom', customType: 'pi-agents', content: '<agent-result name="worker" id="01a1a515" status="completed">\ndone\n</agent-result>', display: true, timestamp: Date.now(),
-      details: { delivery: 'steer', results: [{ name: 'worker', id: '01a1a515', status: 'completed', body: 'done' }] } };
+      details: { delivery: 'steer', results: [{ name: 'worker', id: '01a1a515', status: 'completed', body: 'done' }, { name: 'reviewer', id: '01a1a516', status: 'aborted', body: 'stopped' }] } };
     rpc.emit({ type: 'message_end', message });
     rpc.entries.push({ type: 'custom_message', id: 'n1', parentId: 'a0', timestamp: new Date().toISOString(), customType: message.customType, content: message.content, display: true, details: message.details });
     rpc.emit({ type: 'message_start', message: { role: 'assistant', content: [] } });
@@ -132,9 +134,9 @@ test('an Agent result that starts a host turn after an answer shows the Agent co
     await client.notification('turn/completed');
     const live = client.records.filter(record => record.method === 'item/completed').map(record => record.params.item);
     // Unread, the result is shown once Remote has read the Agent's record, after the reply's first events.
-    const byType = Object.fromEntries(live.map(item => [item.type, item]));
-    assert.deepEqual(live.map(item => item.type).sort(), ['agentMessage', 'dynamicToolCall', 'subAgentActivity']);
-    assert.deepEqual([byType.subAgentActivity.kind, byType.subAgentActivity.agentThreadId, byType.dynamicToolCall.contentItems, byType.agentMessage.phase], ['completed', worker, [{ type: 'inputText', text: 'done' }], 'final_answer']);
+    const activities = live.filter(item => item.type === 'subAgentActivity').map(item => [item.kind, item.agentThreadId, item.agentPath]);
+    assert.deepEqual(activities, [['completed', worker, 'worker'], ['interrupted', reviewer, 'reviewer']]);
+    assert.deepEqual(live.filter(item => item.type === 'agentMessage').map(item => item.phase), ['final_answer']);
     const history = (await client.request('thread/turns/list', { threadId: id, itemsView: 'full' })).data;
     const shown = history.find(value => value.id === turn.id);
     assert.equal(history.length, 2);
@@ -228,6 +230,29 @@ test('the app scans a parent from its latest 300 turns, and other reads start at
   const seen = [...back.data];
   while (back.nextCursor) seen.push(...(back = await client.request('thread/turns/list', { threadId: id, sortDirection: 'desc', limit: 5, itemsView: 'notLoaded', cursor: back.nextCursor })).data);
   assert.equal(seen.at(-1).id, 'u0');
+});
+
+test('a message from another Agent shows nothing live or in history, and the reply it prompts is its turn', async t => {
+  const { rpc, client, id } = await setup(t);
+  rpc.entries.push(
+    { type: 'message', id: 'u0', parentId: null, timestamp: new Date().toISOString(), message: { role: 'user', content: 'earlier', timestamp: Date.now() } },
+    { type: 'message', id: 'a0', parentId: 'u0', timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'answered' }], stopReason: 'stop', timestamp: Date.now() } },
+  );
+  rpc.emit({ type: 'agent_start' });
+  const { params: { turn } } = await client.notification('turn/started');
+  const message = { role: 'custom', customType: 'pi-agents', content: '<agent-message name="pi-storage-audit" id="01a1a515" note="Reply with send">\nfound it\n</agent-message>', display: true, timestamp: Date.now(),
+    details: { delivery: 'followUp', sender: { id: '01a1a515', name: 'pi-storage-audit' } } };
+  rpc.emit({ type: 'message_end', message });
+  rpc.entries.push({ type: 'custom_message', id: 'n1', parentId: 'a0', timestamp: new Date().toISOString(), customType: message.customType, content: message.content, display: true, details: message.details });
+  rpc.emit({ type: 'message_start', message: { role: 'assistant', content: [] } });
+  await tick();
+  rpc.message('a1', { role: 'assistant', content: [{ type: 'text', text: 'replied' }], stopReason: 'stop', timestamp: Date.now() });
+  rpc.emit({ type: 'agent_settled' });
+  await client.notification('turn/completed');
+  const live = client.records.filter(record => record.method === 'item/completed').map(record => record.params.item);
+  assert.deepEqual(live.map(item => [item.type, item.text]), [['agentMessage', 'replied']]);
+  const history = (await client.request('thread/turns/list', { threadId: id, itemsView: 'full', sortDirection: 'asc' })).data;
+  assert.deepEqual(history.map(value => [value.id, value.items.map(item => item.id)]), [['u0', ['u0', 'a0:0']], [turn.id, live.map(item => item.id)]]);
 });
 
 test('Remote steers and interrupts a terminal turn without clearing Pi\'s queue', async t => {
