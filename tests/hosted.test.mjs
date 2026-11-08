@@ -207,6 +207,29 @@ test('a history is read again from its last known entry, and in full on another 
   assert.deepEqual(rpc.requests.filter(request => request.startsWith('get_entries')), ['get_entries since a3', 'get_entries']);
 });
 
+test('the app scans a parent from its latest 300 turns, and other reads start at its first', async t => {
+  const { rpc, client, id } = await setup(t);
+  for (let index = 0; index < 305; index++) {
+    rpc.entries.push({ type: 'message', id: `u${index}`, parentId: rpc.entries.at(-1)?.id ?? null, timestamp: new Date().toISOString(), message: { role: 'user', content: 'ask', timestamp: Date.now() } });
+    rpc.entries.push({ type: 'message', id: `a${index}`, parentId: `u${index}`, timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stopReason: 'stop', timestamp: Date.now() } });
+  }
+  const scan = [];
+  let cursor = null;
+  do {
+    const page = await client.request('thread/turns/list', { threadId: id, sortDirection: 'asc', limit: 100, itemsView: 'notLoaded', cursor });
+    scan.push(...page.data.map(turn => turn.id));
+    cursor = page.nextCursor;
+  } while (cursor);
+  assert.deepEqual([scan.length, scan[0], scan.at(-1)], [300, 'u5', 'u304']);
+  assert.equal((await client.request('thread/turns/list', { threadId: id, sortDirection: 'asc', limit: 1, itemsView: 'notLoaded' })).data[0].id, 'u0');
+  assert.equal((await client.request('thread/turns/list', { threadId: id, sortDirection: 'asc', limit: 100, itemsView: 'full' })).data[0].id, 'u0');
+  // Scrolling back still reaches the first turn.
+  let back = await client.request('thread/turns/list', { threadId: id, sortDirection: 'desc', limit: 5, itemsView: 'notLoaded', cursor: null });
+  const seen = [...back.data];
+  while (back.nextCursor) seen.push(...(back = await client.request('thread/turns/list', { threadId: id, sortDirection: 'desc', limit: 5, itemsView: 'notLoaded', cursor: back.nextCursor })).data);
+  assert.equal(seen.at(-1).id, 'u0');
+});
+
 test('Remote steers and interrupts a terminal turn without clearing Pi\'s queue', async t => {
   const { rpc, client, id } = await setup(t);
   rpc.emit({ type: 'agent_start' });

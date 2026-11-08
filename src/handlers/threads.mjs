@@ -6,6 +6,9 @@ import { revertCommand, revertEntryType } from '../revert-command.mjs';
 import { modelKey, invalid, supportedEfforts, applyEffort, workspaceSettings, executionSettings, providerSettings, modelIdentity } from '../codex.mjs';
 import { offsetPage, historyCursor, historyPage, turnView } from '../pages.mjs';
 
+// The latest turns the app's scan of a parent reads; an Agent spawned before them still opens by its ID.
+const ASC_SCAN_WINDOW = 300;
+
 export const threadsHandlers = {
   async 'thread/goal/get'(params) {
     await this.thread(params.threadId);
@@ -163,7 +166,10 @@ export const threadsHandlers = {
   async 'thread/loaded/list'(params) { return offsetPage([...this.loaded.keys()], params, Math.max(this.loaded.size, 1)); },
   async 'thread/turns/list'(params) {
     await this.thread(params.threadId);
-    const turns = await this.turns(params.threadId);
+    let turns = await this.turns(params.threadId);
+    // Before opening an Agent the app reads its parent's turns without items, 100 at a time from the first; it starts at the latest ones.
+    // Reads of the first turn, or of whole turns, are smaller pages or load items, and keep starting at the first.
+    if (params.sortDirection === 'asc' && params.cursor == null && params.itemsView === 'notLoaded' && params.limit >= 100) turns = turns.slice(-ASC_SCAN_WINDOW);
     if (params.sortDirection !== 'asc') turns.reverse();
     const page = historyPage(turns, params, turn => turn.id, this.historyContext(params.threadId, 'turns'));
     page.data = page.data.map(turn => turnView(turn, params.itemsView ?? 'summary'));
