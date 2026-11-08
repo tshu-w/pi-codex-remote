@@ -162,8 +162,8 @@ test('an owned Agent thread is active from its input until its result, while its
   assert.deepEqual(status(), ['active', 'notLoaded', 'active', 'notLoaded']);
 });
 
-test('a thread lists its running Agents and the 20 last active, and opens any other by ID', async t => {
-  const { rpc, client, id, agents } = await setup(t, { children: 25 });
+test('a thread lists its running Agents and the 50 last active, and opens any other by ID', async t => {
+  const { rpc, client, id, agents } = await setup(t, { children: 55 });
   rpc.entries.push({ type: 'custom', id: 'e0', parentId: null, timestamp: new Date().toISOString(), customType: 'pi-agents-agent', data: { id: agents[0].id, name: 'agent-0', inputs: [{ id: 'i1', state: 'running' }] } });
   // An old session rewritten today keeps its place: recency is its last entry's time.
   agents[5].lastActive = new Date(4000);
@@ -172,7 +172,7 @@ test('a thread lists its running Agents and the 20 last active, and opens any ot
   const listed = (await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 200, sortKey: 'created_at' })).data;
   assert.deepEqual(listed.map(thread => thread.id), [...agents.slice(6).reverse(), agents[2], agents[0]].map(agent => agent.id));
   assert.equal(listed.at(-1).status.type, 'active');
-  // A page's cursor continues the list after another Agent becomes the 20th last active.
+  // A page's cursor continues the list after another Agent becomes the 50th last active.
   const first = await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 2, sortKey: 'created_at', sortDirection: 'asc' });
   assert.deepEqual(first.data.map(thread => thread.id), [agents[0].id, agents[2].id]);
   agents[2].lastActive = new Date(0);
