@@ -32,6 +32,7 @@ class HostedRpc {
   }
   async request(type, params = {}) {
     this.requests.push(params.since === undefined ? type : `${type} since ${params.since}`);
+    this.onRequest?.(type);
     // Pi answers after the events already in flight, as through pd's relay.
     await tick();
     if (type === 'get_state') return structuredClone(this.state);
@@ -253,6 +254,17 @@ test('a message from another Agent shows nothing live or in history, and the rep
   assert.deepEqual(live.map(item => [item.type, item.text]), [['agentMessage', 'replied']]);
   const history = (await client.request('thread/turns/list', { threadId: id, itemsView: 'full', sortDirection: 'asc' })).data;
   assert.deepEqual(history.map(value => [value.id, value.items.map(item => item.id)]), [['u0', ['u0', 'a0:0']], [turn.id, live.map(item => item.id)]]);
+});
+
+test('a turn started elsewhere while Remote sets up its own keeps the thread and still completes', async t => {
+  const { rpc, client, id } = await setup(t);
+  // The terminal starts a run while Remote switches the model for its turn.
+  rpc.onRequest = type => { if (type === 'set_model') rpc.emit({ type: 'agent_start' }); };
+  const response = await client.raw('turn/start', { threadId: id, model: 'fixture/scripted', input: [{ type: 'text', text: 'mine', text_elements: [] }] });
+  assert.match(response.error.message, /already running/);
+  const { params: { turn } } = await client.notification('turn/started');
+  rpc.emit({ type: 'agent_settled' });
+  assert.equal((await client.notification('turn/completed', params => params.turn.id === turn.id)).params.turn.id, turn.id);
 });
 
 test('Remote steers and interrupts a terminal turn without clearing Pi\'s queue', async t => {

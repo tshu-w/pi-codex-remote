@@ -7,7 +7,7 @@ import { model, setup, waitFor } from './harness.mjs';
 const image = { type: 'image', url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==' };
 const input = text => [{ type: 'text', text, text_elements: [] }];
 
-test('durable queue edits, ordering, selected start, interruption and resume', { timeout: 120000 }, async t => {
+test('durable queue edits, ordering, selected start, interruption and resuming by sending', { timeout: 120000 }, async t => {
   const f = await setup(t);
   const first = f.start();
   const { client, protocol } = first;
@@ -52,8 +52,11 @@ test('durable queue edits, ordering, selected start, interruption and resume', {
   await protocol.close();
   const second = f.start();
   assert.deepEqual((await second.client.request('thread/queue/list', { threadId })).data.map(item => item.id), [persisted.id]);
+  // As in Codex, viewing a thread the user interrupted leaves its queue; their next message resumes it.
   await second.client.request('thread/resume', { threadId, excludeTurns: true });
-  await waitFor(async () => (await f.calls()).some(call => call.prompt === 'after-restart') && !second.protocol.active.has(threadId), 'resume drains durable queue');
+  assert.equal(second.protocol.meta.queues[threadId].paused, true, 'viewing does not resume an interrupted queue');
+  await second.client.turn(threadId, 'next');
+  await waitFor(async () => (await f.calls()).some(call => call.prompt === 'after-restart') && !second.protocol.active.has(threadId), 'sending drains the durable queue');
   assert.deepEqual((await second.client.request('thread/queue/list', { threadId })).data, []);
   assert.equal((await f.calls()).at(-1).images.at(-1), image.url.split(',')[1]);
 });

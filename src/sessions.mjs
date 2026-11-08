@@ -103,6 +103,7 @@ export class RpcSession {
     for (const listener of this.listeners) listener(record);
   }
 
+  // A failed session takes no more requests, so its Pi is stopped and the session released.
   fail(error) {
     this.failure ||= error;
     for (const request of this.pending.values()) {
@@ -110,6 +111,7 @@ export class RpcSession {
       request.reject(this.failure);
     }
     this.pending.clear();
+    void this.close();
   }
 
   send(record) {
@@ -147,7 +149,8 @@ export class RpcSession {
   refresh() { return this.request('get_state'); }
 
   close() {
-    this.closing ||= this.stop();
+    // Stopping fails the session, which closes it: `closing` is set first.
+    this.closing ||= Promise.resolve().then(() => this.stop());
     return this.closing;
   }
 

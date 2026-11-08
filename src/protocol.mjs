@@ -400,7 +400,9 @@ export class Protocol {
         this.notificationBarriers.set(threadId, barrier);
       }
       const result = await this.dispatch(message.method, message.params ?? {}, emit);
-      if (message.method === 'thread/resume') await this.queueResume(threadId);
+      // As in Codex, viewing a thread starts a queue the user did not interrupt; sending to it resumes one they did.
+      if (message.method === 'thread/resume') this.scheduleQueue(threadId);
+      if (message.method === 'turn/start') await this.queueResume(threadId);
       this.onResponse(message, null, result);
       checkSchema({ id: message.id, result }, message.method);
       emit({ id: message.id, result });

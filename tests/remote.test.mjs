@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { Remote } from '../src/remote.mjs';
 
@@ -152,4 +155,19 @@ test('closed stream state keeps only the most recent streams', async t => {
   assert.equal(instance.sequences.size, 256);
   assert.equal(instance.closedStreams.has('client\0stream-43'), false);
   assert.equal(instance.sequences.get('client\0stream-299'), 1);
+});
+
+test('a failed state write does not stop later ones', async t => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'codex-remote-state-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  const instance = new Remote({ stateDir, authPath: join(stateDir, 'auth.json'), handle() {} });
+  t.after(() => instance.dispatcher.destroy());
+  await instance.initialize();
+  const file = instance.file;
+  instance.file = join(stateDir, 'missing', 'remote.json');
+  await assert.rejects(instance.persist());
+  instance.file = file;
+  instance.state.cursor = 'after';
+  await instance.persist();
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).cursor, 'after');
 });

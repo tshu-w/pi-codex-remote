@@ -33,3 +33,17 @@ test('RPC framing preserves chunked Unicode responses, events and invalid-output
   await assert.rejects(failed, /Invalid Pi RPC output/);
   assert.equal(signal, 'SIGTERM');
 });
+
+test('a failed session stops its Pi', async t => {
+  const child = Object.assign(new EventEmitter(), {
+    stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null, signalCode: null, kill() {},
+  });
+  t.after(() => { for (const stream of [child.stdin, child.stdout, child.stderr]) stream.destroy(); });
+  const rpc = new RpcSession(child, { cwd: '/tmp', requestTimeoutMs: 1000, shutdownTimeoutMs: 1000, onState() {}, onClose() {} });
+  child.stdin.emit('error', new Error('EPIPE'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(rpc.closing);
+  assert.equal(child.stdin.writableEnded, true);
+  child.emit('close', 0, null);
+  await rpc.closing;
+});

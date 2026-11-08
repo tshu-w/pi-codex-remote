@@ -69,7 +69,7 @@ export class Remote {
   }
 
   persist() {
-    this.saving = this.saving.then(() => store(this.file, this.state));
+    this.saving = this.saving.catch(() => {}).then(() => store(this.file, this.state));
     return this.saving;
   }
 
@@ -315,13 +315,11 @@ export class Remote {
     const existing = this.clients.get(key);
     let client = existing;
     if (!client) {
-      client = { closed: false, deliveryFailures: 0 };
+      client = { closed: false };
       client.emit = message => {
         if (client.closed) return;
         try { return this.emit(clientId, streamId, message); }
         catch (error) {
-          client.deliveryFailed = true;
-          client.deliveryFailures++;
           this.runtimeReceived.get(key)?.clear();
           this.setStatus('disconnected', error.message);
           this.socket?.close();
@@ -331,10 +329,8 @@ export class Remote {
     }
     if (duplicate) {
       this.trace('duplicate', envelope);
-      const failures = client.deliveryFailures;
       if (!this.runtimeReceived.get(key)?.has(seq) && envelope.message.id != null) {
         await client.emit({ id: envelope.message.id, error: { code: -32000, message: 'Earlier request outcome is unavailable after Remote restart or delivery failure. It may have executed. Reload thread history and current state before retrying any action.' } });
-        if (client.deliveryFailures === failures) client.deliveryFailed = false;
       }
       return;
     }

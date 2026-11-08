@@ -109,12 +109,13 @@ export const turnsMethods = {
     const rpc = external ? await this.takeover(params, effort, prompt) : await this.rpc(params.threadId);
     workspaceSettings(params, rpc.cwd);
     providerSettings(params, rpc);
-    if (this.active.has(params.threadId)) throw invalid('Thread is already running. Use turn/steer.');
     if (!external) {
       if (params.model) await rpc.request('set_model', modelIdentity(params.model));
       await applyEffort(rpc, effort);
     }
     if (prompt.images?.length && !rpc.state.model?.input?.includes('image')) throw invalid('The selected Pi model does not support image input.');
+    // A run another client or an extension started while this one was being set up holds the thread.
+    if (this.active.has(params.threadId)) throw invalid('Thread is already running. Use turn/steer.');
     const active = { rpc, turn: { id: turnId, items: [], status: 'inProgress', error: null, startedAt: seconds(Date.now()), completedAt: null, durationMs: null, itemsView: 'full' }, messageIndex: -1, blocks: new Map(), tools: new Map(), messages: [], users: [{ clientId: params.clientUserMessageId ?? null }], completed: new Set(), startedAt: Date.now() };
     active.acceptance = new Promise(resolve => { active.accept = resolve; });
     active.inputs = Promise.resolve();
@@ -593,7 +594,7 @@ export const turnsMethods = {
     active.turn.durationMs = Date.now() - active.startedAt;
     const record = this.catalog.get(active.rpc.id);
     if (record) record.modified = new Date();
-    this.active.delete(active.rpc.id);
+    if (this.active.get(active.rpc.id) === active) this.active.delete(active.rpc.id);
     const lastMessage = active.turn.items.findLast(item => item.type === 'agentMessage');
     const turn = { ...active.turn, items: lastMessage ? [lastMessage] : [], itemsView: lastMessage ? 'summary' : 'notLoaded' };
     this.notify(active.rpc.id, 'turn/completed', { threadId: active.rpc.id, turn });
