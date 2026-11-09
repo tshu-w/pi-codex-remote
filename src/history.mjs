@@ -297,7 +297,6 @@ export function projectHistory(entries, options = {}) {
     && branch[previous.branch.length - 1] === previous.branch.at(-1);
   if (resume && previous.branch.length === branch.length) return previous;
   const turns = resume ? previous.turns.slice(0, previous.frozen) : [];
-  const final = turns.length;
   let start = resume ? previous.start : 0;
   let turn;
   const tools = new Map();
@@ -312,24 +311,8 @@ export function projectHistory(entries, options = {}) {
     unphased.forEach(({ item, toolUse }, index) => { item.phase = toolUse || index < unphased.length - 1 ? 'commentary' : 'final_answer'; });
     unphased = [];
   };
-  const nestedItems = new Map(branch.filter(entry => entry.type === 'custom' && entry.customType === 'codex-remote-tool')
-    .map(entry => [entry.data.item.id, entry.data]));
   for (let index = start; index < branch.length; index++) {
     const entry = branch[index];
-    if (entry.type === 'custom' && entry.customType === 'codex-remote-tool') {
-      const saved = entry.data;
-      let parent = saved.parentToolCallId;
-      while (nestedItems.has(parent)) parent = nestedItems.get(parent).parentToolCallId;
-      const owner = [...turns, turn].find(candidate => candidate?.items.some(item => item.id === parent));
-      // A nested call recorded after its turn changes a turn taken as final.
-      if (resume && turns.indexOf(owner) !== -1 && turns.indexOf(owner) < final) return projectHistory(entries, { ...options, previous: undefined });
-      if (owner && !owner.items.some(item => item.id === saved.item.id)) {
-        const item = structuredClone(saved.item);
-        owner.items.push(item);
-        tools.set(item.id, item);
-      }
-      continue;
-    }
     const message = entry.type === 'message' ? entry.message : undefined;
     const role = message?.role;
     if (role === 'system') continue;
@@ -389,18 +372,6 @@ export function projectHistory(entries, options = {}) {
         turn.items.push(item);
       }
       updateToolItem(item, message, { complete: true, isError: message.isError, durationMs: message.durationMs, cwd, senderThreadId, ...inputs.get(message.toolCallId) });
-      for (const call of message.nestedCalls?.calls ?? []) {
-        if (tools.has(call.id)) continue;
-        const saved = nestedItems.get(call.id);
-        const nested = saved ? structuredClone(saved.item) : toolItem(call.id, call.name, call.arguments ?? null, { cwd, senderThreadId });
-        if (call.status !== 'unfinished') {
-          nested.status = call.status === 'ok' ? 'completed' : 'failed';
-          if (!['fileChange', 'collabAgentToolCall'].includes(nested.type)) nested.durationMs = call.durationMs ?? null;
-          if (nested.type === 'dynamicToolCall') nested.success = call.status === 'ok';
-        }
-        tools.set(call.id, nested);
-        turn.items.push(nested);
-      }
     } else if (role === 'bashExecution') {
       turn.items.push({
         type: 'commandExecution', id: entry.id, command: message.command,

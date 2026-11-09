@@ -94,7 +94,7 @@ export async function setup(t, { hosted } = {}) {
   const env = ['-i', `PATH=${process.env.PATH}`, `HOME=${dirs.home}`, `XDG_STATE_HOME=${dirs.state}`,
     `PI_CODING_AGENT_DIR=${dirs.config}`, `PI_CODING_AGENT_SESSION_DIR=${dirs.sessions}`, `FIXTURE_CALLS=${calls}`,
     'PI_OFFLINE=1', 'PI_SKIP_VERSION_CHECK=1', 'PI_TELEMETRY=0'];
-  const options = ['--tools', 'read,bash,edit,write,grep,find,ls,mcp__fixture__lookup,nested,agent', '--no-extensions', '-e', remoteExtension, '-e', extension, '--no-skills', '--no-prompt-templates',
+  const options = ['--tools', 'read,bash,edit,write,grep,find,ls,mcp__fixture__lookup,program,agent', '--no-extensions', '-e', remoteExtension, '-e', extension, '--no-skills', '--no-prompt-templates',
     '--no-themes', '--no-context-files', '--session-dir', dirs.sessions];
   const start = ({ releaseDelayMs } = {}) => {
     const sessions = new Sessions({

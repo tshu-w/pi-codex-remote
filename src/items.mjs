@@ -5,13 +5,15 @@ export const toolPath = (path, cwd) => resolve(cwd, path === '~' ? homedir() : p
 
 export function toolItem(id, name, args, { cwd = '', namespace = null } = {}) {
   const fileQuery = ['read', 'grep', 'find', 'ls'].includes(name) && args && (name !== 'read' || typeof args.path === 'string');
-  if ((['bash', 'powershell'].includes(name) && typeof args?.command === 'string') || fileQuery) {
+  // A Program run shows its code like a command; its output covers the calls it makes.
+  const program = name === 'program' && args?.action === 'run' && typeof args.code === 'string';
+  if ((['bash', 'powershell'].includes(name) && typeof args?.command === 'string') || fileQuery || program) {
     const positional = ['grep', 'find'].includes(name) ? ['pattern', 'path'] : ['path'];
     const command = fileQuery ? [name,
       ...positional.map(key => args[key] ?? (key === 'path' ? '.' : null))
         .filter(value => value != null).map(value => JSON.stringify(value)),
       ...Object.entries(args).filter(([key, value]) => !positional.includes(key) && value != null)
-        .map(([key, value]) => `${key}=${JSON.stringify(value)}`)].join(' ') : args.command;
+        .map(([key, value]) => `${key}=${JSON.stringify(value)}`)].join(' ') : program ? args.code : args.command;
     const path = fileQuery ? toolPath(args.path ?? '.', cwd) : null;
     const action = name === 'read' ? { type: 'read', command, name: basename(path), path }
       : name === 'grep' ? { type: 'search', command, query: args.pattern ?? null, path }
@@ -55,6 +57,8 @@ function collabToolItem(id, name, args, result, senderThreadId) {
   let receiverThreadIds;
   let tool;
   let agentsStates = {};
+  const spawnLabel = details.queued ? text.match(/^Agent (.+) queued: [^\n]+\.$/)?.[1]
+    : text.startsWith('Agent ') && text.endsWith(' started.') ? text.slice(6, -9) : undefined;
   if (args?.action === 'wait' && Array.isArray(details.results) && Array.isArray(details.pending) &&
       details.pending.every(validId) && details.results.every(entry => entry && validId(entry.id) &&
         typeof entry.name === 'string' && ['completed', 'failed', 'aborted'].includes(entry.state) &&
@@ -62,6 +66,11 @@ function collabToolItem(id, name, args, result, senderThreadId) {
     receiverThreadIds = [...new Set([...details.results.map(entry => entry.id), ...details.pending])];
     tool = 'wait';
     // Input outcomes are not current Agent states; the native UI hides wait.
+  } else if (args?.action === 'wait' && knownKeys(['pending', 'timedOut', 'interrupted']) && Array.isArray(details.pending) &&
+      details.pending.every(entry => entry && validId(entry.id) && typeof entry.name === 'string')) {
+    // Current pi-agents reports only what is still pending; results arrive as notices.
+    receiverThreadIds = details.pending.map(entry => entry.id);
+    tool = 'wait';
   } else if (args?.action === 'list' && Number.isSafeInteger(details.total) && details.total >= 0 &&
       Array.isArray(details.agents) && details.total >= details.agents.length &&
       details.agents.every(entry => entry && validId(entry.id) &&
@@ -73,13 +82,12 @@ function collabToolItem(id, name, args, result, senderThreadId) {
     agentsStates = Object.fromEntries(details.agents.filter(entry => entry.state !== 'idle')
       .map(entry => [entry.id, { status: 'running', message: null }]));
   } else if (args?.action === 'spawn' && validId(details.id) && typeof details.name === 'string' && details.name &&
-      details.queued === false && knownKeys(['id', 'name', 'queued']) &&
-      text.startsWith('Agent ') && text.endsWith(' started.') &&
-      labelMatches(text.slice(6, -9), details.id, details.name)) {
+      typeof details.queued === 'boolean' && knownKeys(['id', 'name', 'queued']) &&
+      labelMatches(spawnLabel, details.id, details.name)) {
     receiverThreadIds = [details.id];
     tool = 'spawnAgent';
-    // A started Agent runs until its result arrives.
-    agentsStates = { [details.id]: { status: 'running', message: null } };
+    // A started Agent runs until its result arrives; a queued one waits for a slot.
+    agentsStates = { [details.id]: { status: details.queued ? 'pendingInit' : 'running', message: null } };
   } else if (args?.action === 'send' && args.deliverAs === 'write' && knownKeys(['ids']) &&
       Array.isArray(details.ids) && details.ids.length && details.ids.every(validId) &&
       text.startsWith('Write accepted by ') && text.endsWith('.')) {
@@ -143,8 +151,8 @@ export function updateToolItem(item, result, { complete = false, isError = false
     item.aggregatedOutput = toolOutput(result);
     if (complete) {
       const code = result?.structuredContent?.exit_code;
-      // File tools have no process exit code; use their outcome for the client's status footer.
-      item.exitCode = item.commandActions.length ? (isError ? 1 : 0) : Number.isInteger(code) ? code : null;
+      // File tools and Programs have no process exit code; use their outcome for the client's status footer.
+      item.exitCode = item.commandActions.length || name === 'program' ? (isError ? 1 : 0) : Number.isInteger(code) ? code : null;
     }
   } else if (item.type === 'mcpToolCall') {
     // Keep Pi's post-hook (possibly redacted) output, not an unfiltered MCP payload.

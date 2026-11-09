@@ -27,8 +27,8 @@ export default function (pi) {
     parameters: { type: 'object', properties: {} },
     async execute() { return { content: [{ type: 'text', text: 'lookup result' }], details: { server: 'fixture-server', tool: 'lookup-original' } }; },
   });
-  pi.registerTool({ name: 'nested', label: 'Nested fixture', description: 'Exercise nested calls',
-    parameters: { type: 'object', properties: {} },
+  pi.registerTool({ name: 'program', label: 'Program fixture', description: 'Exercise nested calls',
+    parameters: { type: 'object', properties: { action: { type: 'string' }, code: { type: 'string' } } },
     async execute(_id, _args, _signal, _update, ctx) {
       await ctx.executeTool('read', { path: 'input.txt' });
       await ctx.executeTool('mcp__fixture__lookup', {});
@@ -51,18 +51,20 @@ export default function (pi) {
           usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
         children.set(args.name, child.getSessionId());
         writeFileSync(childrenFile, JSON.stringify([...children]));
-        details = { id: child.getSessionId(), name: args.name, queued: false };
+        details = { id: child.getSessionId(), name: args.name, queued: args.name === 'reviewer' };
       } else {
         const ids = [args.target].flat().map(target => children.get(target) ?? target);
         details = args.action === 'abort' ? { id: ids[0], aborted: true }
           : args.action === 'send' ? (args.deliverAs === 'write' ? { ids } : { id: ids[0], queued: false })
+          : args.action === 'wait' && args.target ? { pending: ids.map(id => ({ id, name: args.target })), timedOut: true }
           : args.action === 'wait' ? { results: ['First result', 'Second result'].map(result => ({ id: children.get('researcher'), name: 'researcher', state: 'completed', history: false, result })), pending: [] }
           : { total: children.size, agents: [...children].map(([name, id]) => ({ id, name, ownerId: ctx.sessionManager.getSessionId(), state: name === 'researcher' ? 'waiting' : 'idle' })) };
       }
       const label = id => [...children].find(([, value]) => value === id)?.[0] + ' (' + id.slice(0, 8) + ')';
-      const output = args.action === 'spawn' ? 'Agent ' + label(details.id) + ' started.'
+      const output = args.action === 'spawn' ? 'Agent ' + label(details.id) + (details.queued ? ' queued: all 3 slots are busy.' : ' started.')
         : args.action === 'abort' ? 'Agent ' + label(details.id) + ' aborted.'
         : args.action === 'send' ? (args.deliverAs === 'write' ? 'Write accepted by ' + details.ids.map(label).join(', ') : 'Input accepted by ' + label(details.id)) + '.'
+        : args.action === 'wait' && args.target ? 'Wait timed out. Still pending: ' + details.pending.map(entry => label(entry.id)).join(', ')
         : args.action === 'wait' ? details.results.map(result => '<agent-result name="' + result.name + '" id="' + result.id.slice(0, 8) + '" status="' + result.state + '">\n' + result.result + '\n</agent-result>').join('\n\n')
         : details.agents.map(agent => label(agent.id) + '  ' + agent.state + '  ' + ctx.cwd).join('\n');
       return { content: [{ type: 'text', text: output + (args.message === 'Hooked' ? '\nAdditional hook output' : '') }], details: args.message === 'Legacy' ? undefined : details };
@@ -102,12 +104,13 @@ export default function (pi) {
           const result = context.messages.slice(last + 1).find(value => value.role === 'toolResult');
           const [tool, ...rest] = prompt.split(' ');
           push({ type: 'start', partial: message });
-          if (['read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'mcp__fixture__lookup', 'nested', 'agent'].includes(tool) && !result) {
+          if (['read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'mcp__fixture__lookup', 'program', 'agent'].includes(tool) && !result) {
             const args = tool === 'agent' ? JSON.parse(rest.join(' ')) : tool === 'bash' ? { command: rest.join(' ') }
               : tool === 'write' ? { path: rest[0], content: rest.slice(1).join(' ') || 'written' }
               : tool === 'edit' ? { path: rest[0], edits: [{ oldText: 'written', newText: 'edited' }] }
               : tool === 'grep' ? { pattern: rest[0], path: '.' }
               : tool === 'find' ? { pattern: rest[0], path: '.' }
+              : tool === 'program' ? { action: 'run', code: rest.join(' ') }
               : ['read', 'ls'].includes(tool) ? { path: rest[0] || '.' } : {};
             const call = { type: 'toolCall', id: 'fixture-' + Date.now(), name: tool, arguments: args };
             message.content.push({ type: 'text', text: 'Working on it.', ...(unsigned ? {} : { textSignature: JSON.stringify({ v: 1, id: 'fixture-comment', phase: 'commentary' }) }) });

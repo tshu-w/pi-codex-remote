@@ -504,21 +504,9 @@ export const turnsMethods = {
       active.error = message.stopReason === 'error' ? message.errorMessage ?? 'Pi model request failed' : undefined;
       active.interrupted ||= message.stopReason === 'aborted';
     } else if (event.parentToolCallId && event.type.startsWith('tool_execution_')) {
-      // Like history, nested calls show what Pi records in nestedCalls: no results.
-      if (event.type === 'tool_execution_start') {
-        active.tools.set(event.toolCallId, this.startItem(active, toolItem(event.toolCallId, event.toolName, event.args ?? null, { cwd: rpc.cwd, senderThreadId: rpc.id })));
-        (active.toolStartedAt ??= new Map()).set(event.toolCallId, Date.now());
-      } else if (event.type === 'tool_execution_end') {
-        const item = active.tools.get(event.toolCallId);
-        if (!item) return;
-        const spawned = event.toolName === 'agent' && item.arguments?.action === 'spawn' && !event.isError && event.result?.details;
-        if (typeof spawned?.id === 'string') (rpc.agents ??= []).push({ id: spawned.id, name: spawned.name });
-        item.status = event.isError ? 'failed' : 'completed';
-        if (!['fileChange', 'collabAgentToolCall'].includes(item.type)) item.durationMs = event.durationMs ?? Date.now() - (active.toolStartedAt?.get(item.id) ?? Date.now());
-        if (item.type === 'dynamicToolCall') item.success = !event.isError;
-        active.toolStartedAt?.delete(item.id);
-        this.completeItem(active, item);
-      }
+      // Like history, nested calls have no items: their parent's arguments and output cover them.
+      const spawned = event.type === 'tool_execution_end' && event.toolName === 'agent' && !event.isError && event.result?.details;
+      if (typeof spawned?.id === 'string' && typeof spawned.name === 'string') (rpc.agents ??= []).push({ id: spawned.id, name: spawned.name });
     } else if (event.type === 'tool_execution_start') {
       const item = toolItem(event.toolCallId, event.toolName, event.args, { cwd: rpc.cwd, senderThreadId: rpc.id });
       // These cards need the result to distinguish images, patches and real tool identities.

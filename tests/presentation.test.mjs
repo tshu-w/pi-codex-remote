@@ -19,7 +19,7 @@ test('phone tool cards and message phases retain their contents after reopening 
   const phone = first.client;
   const { thread } = await phone.request('thread/start', { cwd: f.cwd, model });
   const completed = [];
-  for (const prompt of ['read input.txt', 'grep fixture-data', 'find *.txt', 'ls .', 'write output.txt', 'edit output.txt', 'write output.txt replaced', 'mcp__fixture__lookup', 'nested', 'read missing.txt', 'unsigned read input.txt']) {
+  for (const prompt of ['read input.txt', 'grep fixture-data', 'find *.txt', 'ls .', 'write output.txt', 'edit output.txt', 'write output.txt replaced', 'mcp__fixture__lookup', 'program await tools.read({ path: "input.txt" })', 'read missing.txt', 'unsigned read input.txt']) {
     const turn = await runAndCollect(phone, thread.id, prompt);
     const texts = turn.items.filter(item => item.type === 'agentMessage');
     assert.deepEqual(texts.map(item => item.phase), ['commentary', 'final_answer'], prompt);
@@ -45,13 +45,10 @@ test('phone tool cards and message phases retain their contents after reopening 
   assert.equal(mcp.server, 'fixture-server');
   assert.equal(mcp.tool, 'lookup-original');
   assert.equal(mcp.result.content[0].text, 'lookup result');
-  // Nested calls show Pi's nestedCalls record: arguments and status, no results.
-  const nested = completed[8].items;
-  const nestedRead = nested.find(item => item.type === 'commandExecution');
-  assert.equal(nestedRead.command, 'read "input.txt"');
-  assert.equal(nestedRead.status, 'completed');
-  assert.equal(nestedRead.aggregatedOutput, null);
-  assert.equal(nested.find(item => item.type === 'dynamicToolCall' && item.tool === 'mcp__fixture__lookup').success, true);
+  // A Program run shows its code and output; the calls it makes have no items.
+  const program = completed[8].items.filter(item => !['agentMessage', 'userMessage'].includes(item.type));
+  assert.deepEqual(program.map(({ type, command, cwd, commandActions, aggregatedOutput, exitCode, status }) => ({ type, command, cwd, commandActions, aggregatedOutput, exitCode, status })),
+    [{ type: 'commandExecution', command: 'await tools.read({ path: "input.txt" })', cwd: f.cwd, commandActions: [], aggregatedOutput: 'nested done', exitCode: 0, status: 'completed' }]);
   const failed = completed[9].items.find(item => item.type === 'commandExecution');
   assert.equal(failed.status, 'failed');
   assert.equal(failed.exitCode, 1);
@@ -96,6 +93,7 @@ test('phone tool cards and message phases retain their contents after reopening 
     [{ action: 'send', target: 'researcher', message: 'Continue' }, 'sendInput', [children[0]]],
     [{ action: 'send', target: ['researcher', 'reviewer'], message: 'Notice', deliverAs: 'write' }, 'sendMessage', children],
     [{ action: 'abort', target: 'reviewer' }, 'interruptAgent', [children[1]]],
+    [{ action: 'wait', target: 'researcher' }, 'wait', [children[0]]],
   ]) {
     const items = await agentTurn(args);
     const card = items.find(item => item.type === 'collabAgentToolCall');
@@ -130,7 +128,8 @@ test('phone tool cards and message phases retain their contents after reopening 
     assert.equal(started[0].params.item.senderThreadId, card.senderThreadId);
     assert.deepEqual(started[0].params.item.receiverThreadIds, card.receiverThreadIds);
     // A started Agent runs until its result arrives.
-    const states = card.tool === 'listAgents' ? listed : card.tool === 'spawnAgent' ? { [card.receiverThreadIds[0]]: { status: 'running', message: null } } : {};
+    // A queued Agent waits for a slot.
+    const states = card.tool === 'listAgents' ? listed : card.tool === 'spawnAgent' ? { [card.receiverThreadIds[0]]: { status: card.receiverThreadIds[0] === children[1] ? 'pendingInit' : 'running', message: null } } : {};
     assert.deepEqual(started[0].params.item.agentsStates, states);
     assert.deepEqual(card.agentsStates, states);
     assert.equal(started[0].params.item.status, card.status);
