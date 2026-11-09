@@ -290,6 +290,26 @@ test('releasing a hosted thread disconnects after the delay and leaves the host 
   assert.ok(!rpc.requests.includes('prompt'), 'no release command is sent to the host');
 });
 
+test('opening a released hosted thread joins its running host, and only a running one', async t => {
+  const { protocol, rpc, trash, client, id } = await setup(t, { releaseDelayMs: 50 });
+  client.disconnect();
+  await waitFor(() => rpc.closed, 'released');
+  const host = new HostedRpc(id, rpc.sessionFile, rpc.cwd);
+  let opened = 0;
+  // Probes run Pi directly; only joining a session goes through pd.
+  protocol.sessions.open = async options => { if (!options.ephemeral) opened++; return host; };
+  const viewer = phone(protocol);
+  // No host runs the session: viewing reads its history.
+  await viewer.request('thread/resume', { threadId: id, excludeTurns: true });
+  assert.equal(opened, 0);
+  trash.open = true;
+  await viewer.request('thread/resume', { threadId: id, excludeTurns: true });
+  assert.equal(opened, 1);
+  // A turn the terminal starts streams to the viewer.
+  host.emit({ type: 'agent_start' });
+  await viewer.notification('turn/started');
+});
+
 test('archiving a session its host still holds moves it to Trash once the host exits', async t => {
   const { protocol, rpc, trash, client, id } = await setup(t, { releaseDelayMs: 50 });
   trash.open = true;

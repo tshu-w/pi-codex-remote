@@ -108,6 +108,12 @@ export const threadsHandlers = {
         throw invalid('Resume path must match the existing Pi session selected by threadId.');
       }
     }
+    // Viewing a hosted thread joins its running host, so turns started elsewhere stream to the viewer; it never starts a host.
+    const viewed = this.catalog.get(params.threadId);
+    if (this.sessions.hosted && viewed && !viewed.isSubAgent && !this.loaded.has(params.threadId) && (await this.trash.sessionPids(viewed.path)).length) {
+      // A Pi outside pi-agents holding the session cannot be joined; its history is read as before.
+      await this.rpc(params.threadId).catch(() => {});
+    }
     let readOnly = this.catalog.get(params.threadId)?.isSubAgent || !this.meta.owned?.[params.threadId];
     if (!readOnly && !this.loaded.has(params.threadId) && !this.sessions.hosted) {
       const record = this.catalog.get(params.threadId);
