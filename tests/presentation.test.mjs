@@ -117,9 +117,9 @@ test('phone tool cards and message phases retain their contents after reopening 
   assert.ok(!legacy.some(item => item.type === 'collabAgentToolCall'));
   assert.deepEqual(legacy.find(item => item.type === 'dynamicToolCall' && item.tool === 'agent')?.contentItems,
     [{ type: 'inputText', text: children.map((id, index) => `${['researcher', 'reviewer'][index]} (${id.slice(0, 8)})  ${['waiting', 'idle'][index]}  ${f.cwd}`).join('\n') }]);
-  const hooked = await agentTurn({ action: 'send', target: 'researcher', message: 'Hooked' });
-  assert.ok(!hooked.some(item => item.type === 'collabAgentToolCall'));
-  assert.ok(JSON.stringify(hooked.find(item => item.type === 'dynamicToolCall')).includes('Additional hook output'));
+  // Cards follow details, whatever the result text says.
+  const reworded = await agentTurn({ action: 'send', target: 'researcher', message: 'Reworded' });
+  assert.deepEqual(reworded.find(item => item.type === 'collabAgentToolCall')?.receiverThreadIds, [children[0]]);
   for (const card of completed.flatMap(turn => turn.items).filter(item => item.type === 'collabAgentToolCall')) {
     const started = phone.records.filter(record => record.method === 'item/started' && record.params.item.id === card.id);
     assert.equal(started.length, 1);

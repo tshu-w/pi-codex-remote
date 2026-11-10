@@ -34,31 +34,16 @@ export function toolOutput(result) {
   return (result?.content ?? []).filter(block => block.type === 'text').map(block => block.text).join('\n');
 }
 
-// Wait/list intentionally use native, lossy presentation; other actions require
-// standard acknowledgements. Identities always come from authoritative details.
+// Cards use native, lossy presentation; the action and pi-agents' details decide them, and identities come from details.
 function collabToolItem(id, name, args, result, senderThreadId) {
-  if (name !== 'agent' || typeof senderThreadId !== 'string' || !senderThreadId ||
-      result?.content?.length !== 1 || result.content[0].type !== 'text') return null;
-  const details = result.details;
+  if (name !== 'agent' || typeof senderThreadId !== 'string' || !senderThreadId) return null;
+  const details = result?.details;
   if (!details || typeof details !== 'object') return null;
-  const text = result.content[0].text;
-  if (typeof text !== 'string') return null;
   const validId = value => typeof value === 'string' && value.length >= 8 && !/\s/.test(value);
   const knownKeys = keys => Object.keys(details).every(key => keys.includes(key));
-  const labelMatches = (label, receiver, name) => {
-    if (typeof label !== 'string' || /[\r\n,]/.test(label)) return false;
-    for (let length = 8; length <= receiver.length; length++) {
-      const prefix = receiver.slice(0, length);
-      if (name !== undefined ? label === `${name} (${prefix})`
-        : label === prefix || (label.endsWith(` (${prefix})`) && label.length > prefix.length + 3)) return true;
-    }
-    return false;
-  };
   let receiverThreadIds;
   let tool;
   let agentsStates = {};
-  const spawnLabel = details.queued ? text.match(/^Agent (.+) queued: [^\n]+\.$/)?.[1]
-    : text.startsWith('Agent ') && text.endsWith(' started.') ? text.slice(6, -9) : undefined;
   if (args?.action === 'wait' && Array.isArray(details.results) && Array.isArray(details.pending) &&
       details.pending.every(validId) && details.results.every(entry => entry && validId(entry.id) &&
         typeof entry.name === 'string' && ['completed', 'failed', 'aborted'].includes(entry.state) &&
@@ -82,26 +67,20 @@ function collabToolItem(id, name, args, result, senderThreadId) {
     agentsStates = Object.fromEntries(details.agents.filter(entry => entry.state !== 'idle')
       .map(entry => [entry.id, { status: 'running', message: null }]));
   } else if (args?.action === 'spawn' && validId(details.id) && typeof details.name === 'string' && details.name &&
-      typeof details.queued === 'boolean' && knownKeys(['id', 'name', 'queued']) &&
-      labelMatches(spawnLabel, details.id, details.name)) {
+      typeof details.queued === 'boolean' && knownKeys(['id', 'name', 'queued'])) {
     receiverThreadIds = [details.id];
     tool = 'spawnAgent';
     // A started Agent runs until its result arrives; a queued one waits for a slot.
     agentsStates = { [details.id]: { status: details.queued ? 'pendingInit' : 'running', message: null } };
   } else if (args?.action === 'send' && args.deliverAs === 'write' && knownKeys(['ids']) &&
-      Array.isArray(details.ids) && details.ids.length && details.ids.every(validId) &&
-      text.startsWith('Write accepted by ') && text.endsWith('.')) {
-    const labels = text.slice(18, -1).split(', ');
-    if (labels.length !== details.ids.length || !labels.every((label, index) => labelMatches(label, details.ids[index]))) return null;
+      Array.isArray(details.ids) && details.ids.length && details.ids.every(validId)) {
     receiverThreadIds = details.ids;
     tool = 'sendMessage';
   } else if (args?.action === 'send' && ['followUp', 'steer', undefined].includes(args.deliverAs) &&
-      validId(details.id) && details.queued === false && knownKeys(['id', 'queued']) &&
-      text.startsWith('Input accepted by ') && text.endsWith('.') && labelMatches(text.slice(18, -1), details.id)) {
+      validId(details.id) && typeof details.queued === 'boolean' && knownKeys(['id', 'queued'])) {
     receiverThreadIds = [details.id];
     tool = 'sendInput';
-  } else if (args?.action === 'abort' && validId(details.id) && details.aborted === true && knownKeys(['id', 'aborted']) &&
-      text.startsWith('Agent ') && text.endsWith(' aborted.') && labelMatches(text.slice(6, -9), details.id)) {
+  } else if (args?.action === 'abort' && validId(details.id) && details.aborted === true && knownKeys(['id', 'aborted'])) {
     receiverThreadIds = [details.id];
     tool = 'interruptAgent';
   } else return null;

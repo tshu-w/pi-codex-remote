@@ -67,7 +67,7 @@ export default function (pi) {
         : args.action === 'wait' && args.target ? 'Wait timed out. Still pending: ' + details.pending.map(entry => label(entry.id)).join(', ')
         : args.action === 'wait' ? details.results.map(result => '<agent-result name="' + result.name + '" id="' + result.id.slice(0, 8) + '" status="' + result.state + '">\n' + result.result + '\n</agent-result>').join('\n\n')
         : details.agents.map(agent => label(agent.id) + '  ' + agent.state + '  ' + ctx.cwd).join('\n');
-      return { content: [{ type: 'text', text: output + (args.message === 'Hooked' ? '\nAdditional hook output' : '') }], details: args.message === 'Legacy' ? undefined : details };
+      return { content: [{ type: 'text', text: args.message === 'Reworded' ? 'Delivered.' : output }], details: args.message === 'Legacy' ? undefined : details };
     },
   });
   pi.registerProvider('fixture', {
