@@ -47,7 +47,7 @@ export async function restoreSession(trashPath, originalPath) {
   if (metadata.dev !== parent.dev) throw new Error('Cannot restore across volumes safely. Restore the Trash item manually to its original volume');
   try { await link(source, destination); }
   catch (error) {
-    if (error.code === 'EEXIST') throw new Error('Original session path already exists. Move or rename that file before restoring; nothing was overwritten', { cause: error });
+    if (error.code === 'EEXIST') throw new Error('Original session path already exists. Move or rename that file before restoring', { cause: error });
     if (error.code === 'EXDEV') throw new Error('Cannot restore across volumes safely. Restore the Trash item manually to its original volume', { cause: error });
     throw error;
   }

@@ -51,7 +51,7 @@ export default function codexRemote(pi: ExtensionAPI) {
         return;
       }
       if (ctx.mode !== "tui" && (action === "start" || action === "pair")) {
-        ctx.ui.notify("Enable and pair Codex Remote from a Pi terminal. Remote tasks use Pi's local execution permissions, not Codex sandboxing.", "error");
+        ctx.ui.notify("Enable and pair Codex Remote from a Pi terminal.", "error");
         return;
       }
       let loader: Loader | undefined;

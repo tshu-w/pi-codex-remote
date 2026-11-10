@@ -23,7 +23,7 @@ export async function loadAuth(path) {
   const { tokens } = JSON.parse(await readFile(path, 'utf8'));
   if (!tokens?.access_token || !tokens.account_id) throw new Error('Sign in through official ChatGPT/Codex before enabling Remote. Pi model credentials are not Remote credentials.');
   const claims = JSON.parse(Buffer.from(tokens.access_token.split('.')[1], 'base64url'));
-  if (claims.exp * 1000 <= Date.now()) throw new Error('Official Codex login expired. Refresh it through ChatGPT/Codex; Remote never rotates its refresh token.');
+  if (claims.exp * 1000 <= Date.now()) throw new Error('Official Codex login expired. Refresh it through ChatGPT/Codex.');
   return { accessToken: tokens.access_token, accountId: tokens.account_id };
 }
 
@@ -91,7 +91,7 @@ export class Remote {
   async enrollOnce() {
     const auth = await loadAuth(this.authPath);
     const current = this.state.enrollment;
-    if (current && current.accountId !== auth.accountId) throw new Error('Official login belongs to a different account. Existing Remote pairing was preserved.');
+    if (current && current.accountId !== auth.accountId) throw new Error('Official login belongs to a different account.');
     if (current?.accountId === auth.accountId && Date.parse(current.expires_at) > Date.now() + 5 * 60000) return current;
     const headers = { 'chatgpt-account-id': auth.accountId, 'x-codex-installation-id': this.state.installationId, 'user-agent': `codex_cli_rs/${protocolMethods.version} (Mac OS; arm64)` };
     let enrollment;

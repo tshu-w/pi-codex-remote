@@ -74,7 +74,7 @@ export class RpcSession {
       this.startupDialog = record;
       const title = String(record.title ?? record.method).replace(/\s+/g, ' ').trim();
       const boundedTitle = title.length > 240 ? `${title.slice(0, 240)}…` : title;
-      this.startupError = new Error(`Pi RPC ${this.initializing ? 'startup' : 'probe'} requires local user interaction (${record.method}) in workspace ${JSON.stringify(this.cwd)}: ${JSON.stringify(boundedTitle)}; it was cancelled without approval. Open Pi locally in this workspace to review and authorize the request. For project trust, save a persistent decision before retrying; a one-run --approve is not inherited by Remote.`);
+      this.startupError = new Error(`Pi RPC ${this.initializing ? 'startup' : 'probe'} asked for local input (${record.method}) in workspace ${JSON.stringify(this.cwd)}: ${JSON.stringify(boundedTitle)}. Open Pi in this workspace, answer it there and save the decision, then retry.`);
       this.send({ type: 'extension_ui_response', id: record.id, cancelled: true })
         .then(() => this.fail(this.startupError), error => this.fail(error));
       return;

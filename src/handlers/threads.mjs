@@ -465,7 +465,7 @@ export const threadsMethods = {
     } catch (error) {
       await rpc.close();
       this.loaded.delete(threadId);
-      throw new Error(`History revert was not confirmed: ${error.message} Reopen the thread to inspect its saved branch before retrying. Original history entries were retained.`, { cause: error });
+      throw new Error(`History revert was not confirmed: ${error.message} Reopen the thread to inspect its saved branch before retrying.`, { cause: error });
     } finally { unsubscribe(); }
   },
 
