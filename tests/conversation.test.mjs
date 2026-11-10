@@ -37,7 +37,7 @@ test('a phone conversation runs native tools, keeps Pi permissions and survives 
   // The fixture's permission hook asks for confirmation; Remote cancels Pi dialogs.
   const write = await phone.turn(thread.id, 'write blocked.txt');
   assert.equal(write.status, 'completed');
-  assert.ok(phone.records.some(record => record.method === 'error' && /Fixture permission/.test(record.params.error.message)));
+  assert.ok(phone.records.some(record => record.method === 'warning' && /Fixture permission/.test(record.params.message)));
   await assert.rejects(readFile(join(f.cwd, 'blocked.txt')), { code: 'ENOENT' });
 
   const page = await phone.request('thread/turns/list', { threadId: thread.id, itemsView: 'full', sortDirection: 'asc' });

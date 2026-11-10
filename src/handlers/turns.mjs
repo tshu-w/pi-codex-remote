@@ -376,7 +376,8 @@ export const turnsMethods = {
       void rpc.send({ type: 'extension_ui_response', id: event.id, cancelled: true }).catch(error => {
         if (active) { active.error = error.message; this.finishNotification(active); }
       });
-      if (active) this.notify(rpc.id, 'error', { threadId: rpc.id, turnId: active.turn.id, willRetry: false, error: { message: `Pi dialog cancelled: ${event.title ?? event.method}. Codex Remote dialog approvals are not supported.`, codexErrorInfo: null, additionalDetails: null } });
+      // The turn goes on without an answer, so this is a warning, not the turn's error.
+      if (active) this.notify(rpc.id, 'warning', { threadId: rpc.id, message: `Pi dialog cancelled: ${event.title ?? event.method}. Codex Remote dialog approvals are not supported.` });
       return;
     }
     if (event.type === 'process_exit') {
