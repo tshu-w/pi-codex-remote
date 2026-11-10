@@ -1,5 +1,5 @@
 // Wire format references: openai/codex remote_control and Lqm1/pi-codex-app-server.
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { hostname, homedir } from 'node:os';
 import { join } from 'node:path';
@@ -34,8 +34,8 @@ async function store(path, value) {
 }
 
 export class Remote {
-  constructor({ stateDir = remotePaths().state, authPath = remotePaths().auth, handle, fetchImpl = fetch, socketFactory = (url, options) => new WebSocket(url, options), onStatus = () => {}, disconnect = () => {}, onTrace }) {
-    Object.assign(this, { stateDir, authPath, handle, fetchImpl, socketFactory, onStatus, disconnect, onTrace });
+  constructor({ stateDir = remotePaths().state, authPath = remotePaths().auth, handle, fetchImpl = fetch, socketFactory = (url, options) => new WebSocket(url, options), onStatus = () => {}, disconnect = () => {} }) {
+    Object.assign(this, { stateDir, authPath, handle, fetchImpl, socketFactory, onStatus, disconnect });
     this.pending = new Map();
     this.frameSizes = new WeakMap();
     this.incoming = new Map();
@@ -176,36 +176,8 @@ export class Remote {
     });
   }
 
-  trace(event, envelope) {
-    if (!this.onTrace) return;
-    const hash = value => value == null ? null : createHash('sha256').update(`${typeof value}:${value}`).digest('hex').slice(0, 16);
-    const message = envelope.message;
-    const method = typeof message?.method === 'string' && /^[a-zA-Z][a-zA-Z0-9/]{0,99}$/.test(message.method) ? message.method : null;
-    const detail = {
-      event, type: ['ping', 'pong', 'ack', 'client_closed', 'client_message', 'client_message_chunk', 'server_message', 'server_message_chunk'].includes(envelope.type) ? envelope.type : 'unknown',
-      client: hash(envelope.client_id), stream: hash(envelope.stream_id), seq: Number.isSafeInteger(envelope.seq_id) ? envelope.seq_id : null,
-      request: hash(message?.id), method, errorCode: Number.isInteger(message?.error?.code) ? message.error.code : null,
-      segment: Number.isSafeInteger(envelope.segment_id) ? envelope.segment_id : null,
-      segments: Number.isSafeInteger(envelope.segment_count) ? envelope.segment_count : null,
-      bytes: Number.isSafeInteger(envelope.message_size_bytes) ? envelope.message_size_bytes : null,
-    };
-    if (method === 'command/exec') {
-      const command = message.params?.command;
-      const program = Array.isArray(command) && typeof command[0] === 'string' ? command[0].split('/').at(-1) : null;
-      detail.program = ['sh', 'bash', 'zsh', 'git', 'pwd', 'ls', 'test', 'node', 'python3'].includes(program) ? program : 'other';
-      const sandbox = message.params?.sandboxPolicy?.type;
-      detail.sandboxType = ['readOnly', 'workspaceWrite', 'dangerFullAccess', 'externalSandbox'].includes(sandbox) ? sandbox : 'other';
-      const text = Array.isArray(command) ? command.filter(value => typeof value === 'string').join(' ') : '';
-      detail.execChecks = ['status', 'rev-parse', 'diff', 'branch', 'log'].filter(operation => new RegExp(`\\bgit\\s+${operation}\\b`).test(text)).map(operation => `git-${operation}`);
-    }
-    this.onTrace(detail);
-  }
-
   sendFrame(frame) {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify(frame));
-      this.trace('send', frame);
-    } else this.trace('send-deferred', frame);
+    if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(frame));
   }
 
   frameSize(frame) {
@@ -228,7 +200,6 @@ export class Remote {
     const bytes = Buffer.from(JSON.stringify(event.message ?? event));
     if (bytes.length > MAX_MESSAGE) throw new Error('Remote result exceeds 100 MiB');
     const base = { client_id: clientId, stream_id: streamId, seq_id: seq };
-    this.trace('response', { ...base, ...event, message_size_bytes: bytes.length });
     const frames = [];
     if (bytes.length <= CHUNK_SIZE) frames.push({ ...base, ...event });
     else for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) frames.push({ ...base, type: 'server_message_chunk', segment_id: frames.length, segment_count: Math.ceil(bytes.length / CHUNK_SIZE), message_size_bytes: bytes.length, message_chunk_base64: bytes.subarray(offset, offset + CHUNK_SIZE).toString('base64') });
@@ -245,7 +216,6 @@ export class Remote {
 
   async receive(envelope) {
     const { client_id: clientId, stream_id: streamId, seq_id: seq } = envelope;
-    this.trace('receive', envelope);
     if (typeof clientId !== 'string' || !clientId || clientId.includes('\0')) throw new Error('Invalid Remote client');
     if (envelope.type === 'ping') {
       const status = this.clients.has(`${clientId}\0${streamId}`) ? 'active' : 'unknown';
@@ -276,7 +246,7 @@ export class Remote {
       }
       return;
     }
-    if (this.closedStreams.has(key)) { this.trace('closed-stream', envelope); return; }
+    if (this.closedStreams.has(key)) return;
     if (envelope.type === 'client_closed') {
       this.closeClient(key);
       for (const id of this.pending.keys()) if (id.startsWith(`${key}\0`)) this.pending.delete(id);
@@ -307,7 +277,6 @@ export class Remote {
       const bytes = Buffer.concat(assembly.parts);
       if (bytes.length !== assembly.size) throw new Error('Remote chunk size mismatch');
       envelope = { ...envelope, type: 'client_message', message: JSON.parse(bytes.toString()) };
-      this.trace('assembled', envelope);
     }
     if (envelope.type !== 'client_message') throw new Error(`Unsupported Remote envelope: ${envelope.type}`);
     if (!envelope.message || typeof envelope.message !== 'object' || Array.isArray(envelope.message)) throw new Error('Invalid Remote message');
@@ -328,7 +297,6 @@ export class Remote {
       this.clients.set(key, client);
     }
     if (duplicate) {
-      this.trace('duplicate', envelope);
       if (!this.runtimeReceived.get(key)?.has(seq) && envelope.message.id != null) {
         await client.emit({ id: envelope.message.id, error: { code: -32000, message: 'Earlier request outcome is unavailable after Remote restart or delivery failure. It may have executed. Reload thread history and current state before retrying any action.' } });
       }
@@ -346,8 +314,7 @@ export class Remote {
     this.saveDeliveryState();
     if (envelope.cursor) this.state.cursor = this.cursor = envelope.cursor;
     await this.persist();
-    if (client.closed) { this.trace('closed-before-dispatch', envelope); return; }
-    this.trace('dispatch', envelope);
+    if (client.closed) return;
     await this.handle(envelope.message, client.emit);
     await this.saving;
   }

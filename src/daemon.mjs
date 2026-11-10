@@ -2,96 +2,11 @@ import { createServer, createConnection } from 'node:net';
 import { accessSync, constants, realpathSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { open, readFile, mkdir, unlink, chmod, rename, stat } from 'node:fs/promises';
-import { dirname, extname, isAbsolute, join, normalize, relative } from 'node:path';
-import { tmpdir } from 'node:os';
-import { createHmac, randomBytes } from 'node:crypto';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Remote, remotePaths } from './remote.mjs';
 import { Sessions } from './sessions.mjs';
 import { Protocol } from './protocol.mjs';
-
-export function createInputTrace({ enabled = false, home = process.env.HOME, stateDir, temporaryDir = tmpdir(), now = Date.now,
-  write = record => console.error(`${new Date().toISOString()} [DEBUG-remote-input] ${JSON.stringify(record)}`),
-} = {}) {
-  if (!enabled) return () => {};
-  const expiresAt = now() + 30 * 60 * 1000;
-  const maxRecords = 200;
-  const salt = randomBytes(32);
-  const hash = value => createHmac('sha256', salt).update(value).digest('hex').slice(0, 16);
-  const methods = new Set(['fs/createDirectory', 'fs/writeFile', 'fs/readFile', 'fs/readDirectory', 'fs/getMetadata', 'turn/start', 'turn/steer', 'config/batchWrite', 'config/value/write']);
-  const directories = new Set(['.codex', '.pi', '.cache', 'tmp', 'temp', 'attachments', 'uploads', 'images', 'Library', 'Caches', 'Application Support']);
-  const extensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic', '.heif', '.avif', '.bin']);
-  const configKeys = new Set(['personality', 'features', 'model', 'model_provider', 'model_reasoning_effort', 'model_reasoning_summary', 'model_verbosity', 'service_tier', 'approval_policy', 'sandbox_mode', 'default_permissions', 'web_search', 'hide_agent_reasoning', 'show_raw_agent_reasoning']);
-  const enums = {
-    personality: ['none', 'friendly', 'pragmatic'], model_reasoning_effort: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
-    model_reasoning_summary: ['auto', 'concise', 'detailed', 'none'], model_verbosity: ['low', 'medium', 'high'],
-    service_tier: ['auto', 'default', 'flex', 'priority', 'fast'], approval_policy: ['untrusted', 'on-failure', 'on-request', 'never'],
-    sandbox_mode: ['read-only', 'workspace-write', 'danger-full-access'], web_search: ['disabled', 'cached', 'live'],
-  };
-  const pathInfo = value => {
-    if (typeof value !== 'string') return null;
-    const path = normalize(value);
-    const roots = [[stateDir, 'state'], [temporaryDir, 'temp'], ['/private/tmp', 'temp'], ['/tmp', 'temp'], [home, 'home']];
-    const root = roots.find(([base]) => base && (path === normalize(base) || path.startsWith(`${normalize(base)}/`)));
-    const parts = (root ? relative(root[0], path) : path).split('/').filter(Boolean);
-    const extension = extname(path).toLowerCase();
-    return {
-      root: root?.[1] ?? (isAbsolute(path) ? 'absolute' : 'relative'), id: hash(path), parent: hash(dirname(path)), depth: parts.length,
-      parts: parts.slice(0, 12).map(part => directories.has(part) ? part : `#${hash(part)}`),
-      extension: extensions.has(extension) ? extension : extension ? 'other' : null,
-    };
-  };
-  const dataInfo = value => typeof value === 'string' ? { encodedChars: value.length, estimatedBytes: Buffer.byteLength(value, 'base64') } : null;
-  const inputInfo = part => {
-    if (part?.type === 'text') return { type: 'text', chars: typeof part.text === 'string' ? part.text.length : null };
-    if (part?.type === 'localImage') return { type: 'localImage', path: pathInfo(part.path) };
-    if (part?.type !== 'image') return { type: 'other' };
-    const url = typeof part.url === 'string' ? part.url : '';
-    const source = url.startsWith('data:') ? 'data' : /^https?:/i.test(url) ? 'http' : url.startsWith('file:') ? 'file' : 'other';
-    const prefix = /^data:(image\/(?:png|jpeg|gif|webp|heic|heif|avif));base64,/i.exec(url.slice(0, 96));
-    return { type: 'image', source, mimeType: prefix?.[1].toLowerCase() ?? null, ...(prefix ? dataInfo(url.slice(prefix[0].length)) : {}) };
-  };
-  const editInfo = edit => {
-    const key = typeof edit?.keyPath === 'string' ? edit.keyPath : '';
-    const value = edit?.value;
-    return {
-      keyPath: key ? key.split('.').slice(0, 8).map(part => configKeys.has(part) ? part : `#${hash(part)}`).join('.') : null,
-      valueType: value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value,
-      ...(typeof value === 'boolean' || Object.hasOwn(enums, key) && enums[key].includes(value) ? { value } : {}),
-    };
-  };
-  let count = 0;
-  let stopped = false;
-  write({ phase: 'enabled', expiresAt: new Date(expiresAt).toISOString(), maxRecords });
-  return (request, phase = 'request', error) => {
-    if (stopped || !methods.has(request?.method)) return;
-    if (now() >= expiresAt || count >= maxRecords) {
-      stopped = true;
-      write({ phase: 'disabled', reason: now() >= expiresAt ? 'expired' : 'limit' });
-      return;
-    }
-    count++;
-    const { method, id } = request;
-    const record = { phase, method, request: ['string', 'number'].includes(typeof id) ? hash(`${typeof id}:${id}`) : null };
-    if (phase === 'response') record.errorCode = Number.isInteger(error?.code) ? error.code : null;
-    else {
-      const params = request.params ?? {};
-      if (method.startsWith('fs/')) {
-        record.path = pathInfo(params.path);
-        if (method === 'fs/createDirectory') record.recursive = typeof params.recursive === 'boolean' ? params.recursive : null;
-        if (method === 'fs/writeFile') record.dataBase64 = dataInfo(params.dataBase64);
-      } else if (method.startsWith('turn/')) {
-        record.inputCount = Array.isArray(params.input) ? params.input.length : null;
-        record.input = Array.isArray(params.input) ? params.input.slice(0, 10).map(inputInfo) : [];
-      } else {
-        const edits = method === 'config/value/write' ? [params] : params.edits;
-        record.editsCount = Array.isArray(edits) ? edits.length : null;
-        record.edits = Array.isArray(edits) ? edits.slice(0, 20).map(editInfo) : [];
-      }
-    }
-    write(record);
-  };
-}
 
 const MAX_LOG = 10 * 1024 * 1024;
 
@@ -165,49 +80,16 @@ async function serve() {
   const hosted = (process.env.PATH ?? '').split(':').some(dir => { try { accessSync(join(dir, 'pi-agents'), constants.X_OK); return true; } catch { return false; } });
   console.error(`${new Date().toISOString()} sessions ${hosted ? 'pi-agents hosts' : 'pi'}`);
   const sessions = new Sessions({ hosted: hosted ? { command: 'pi-agents' } : undefined });
-  const inputTrace = createInputTrace({ enabled: process.env.PI_REMOTE_INPUT_TRACE === '1', stateDir: p.state });
   const protocol = new Protocol({ sessions, cwd: process.env.HOME, stateDir: p.state, onResponse: (request, error, result) => {
-    inputTrace(request, 'response', error);
     const validation = [-32601, -32602].includes(error?.code) ? ` ${error.message}` : '';
     const threadId = request.params?.threadId ?? result?.thread?.id;
     const threadContext = typeof threadId === 'string' && /^[0-9a-f-]{36}$/i.test(threadId) ? ` thread:${threadId}` : '';
     console.error(`${new Date().toISOString()} ${request.method} ${error ? `error:${error.code ?? -32000}${validation}` : 'ok'}${threadContext}`);
-    if (!error && request.method === 'thread/list') {
-      const params = request.params ?? {};
-      console.error(JSON.stringify({
-        method: 'thread/list', limit: params.limit ?? 50, archived: Boolean(params.archived),
-        sortKey: params.sortKey ?? 'created_at', sortDirection: params.sortDirection ?? 'desc', cursor: Boolean(params.cursor),
-        cwdFilter: Boolean(params.cwd), searchFilter: Boolean(params.searchTerm),
-        projectFilter: params.projectId != null, sectionFilter: params.sectionId != null,
-        parentFilter: Boolean(params.parentThreadId), ancestorFilter: Boolean(params.ancestorThreadId),
-        sourceFilter: Boolean(params.sourceKinds?.length), acceptsPiSource: !params.sourceKinds?.length || params.sourceKinds.some(kind => ['unknown', 'subAgent', 'subAgentOther'].includes(kind)),
-        providerFilter: Boolean(params.modelProviders?.length), acceptsPiProvider: !params.modelProviders?.length || params.modelProviders.includes('custom'),
-        catalogSize: protocol.catalog.size, returned: result.data.length, hasNextPage: result.nextCursor != null,
-      }));
-    }
-    if (!error && ['thread/turns/list', 'thread/items/list'].includes(request.method)) {
-      const { limit, cursor, sortDirection, itemsView, turnId } = request.params ?? {};
-      console.error(JSON.stringify({ method: request.method, limit: limit ?? null, cursor: cursor == null ? null : typeof cursor === 'string' ? cursor.slice(0, 80) : cursor, sortDirection: sortDirection ?? null, itemsView: itemsView ?? null, turnId: turnId ?? null, returned: result.data.length, nextCursor: Boolean(result.nextCursor), backwardsCursor: Boolean(result.backwardsCursor) }));
-    }
-    if (request.method === 'thread/resume') {
-      console.error(JSON.stringify({
-        method: 'thread/resume', excludeTurns: Boolean(request.params?.excludeTurns), initialTurnsPage: Boolean(request.params?.initialTurnsPage),
-        historyMode: result?.thread?.historyMode ?? null, status: result?.thread?.status?.type ?? null,
-        returnedTurns: result?.thread?.turns?.length ?? null, returnedInitialTurns: result?.initialTurnsPage?.data?.length ?? null,
-        canAcceptDirectInput: result?.thread?.canAcceptDirectInput ?? null,
-      }));
-    }
-    if (error && ['thread/start', 'thread/resume', 'thread/read', 'thread/settings/update', 'turn/start'].includes(request.method)) {
-      const { sandbox, sandboxPolicy, approvalPolicy, approvalsReviewer, modelProvider, model, summary, config, ...rest } = request.params ?? {};
-      console.error(JSON.stringify({ method: request.method, sandbox, sandboxPolicy, approvalPolicy, approvalsReviewer, modelProvider, model, dynamicToolsCount: Array.isArray(rest.dynamicTools) ? rest.dynamicTools.length : rest.dynamicTools == null ? null : 'invalid', historyMode: rest.historyMode == null ? null : ['legacy', 'paginated'].includes(rest.historyMode) ? rest.historyMode : 'unsupported', summary: summary == null ? null : ['auto', 'concise', 'detailed', 'none'].includes(summary) ? summary : 'unsupported', configKeys: Object.keys(config ?? {}), keys: Object.keys(rest) }));
-    }
   } });
   const remote = new Remote({ stateDir: p.state, handle: (message, emit) => {
-    inputTrace(message);
     if (message.id !== undefined) console.error(`${new Date().toISOString()} ${message.method}`);
     return protocol.handle(message, emit);
   }, disconnect: emit => protocol.disconnect(emit),
-  onTrace: process.env.PI_REMOTE_TRACE === '1' ? event => console.error(`${new Date().toISOString()} [DEBUG-remote-delivery] ${JSON.stringify(event)}`) : undefined,
   onStatus: ({ status, error }) => console.error(`${new Date().toISOString()} remote ${status}${error ? ' error' : ''}`),
   });
   let server;
