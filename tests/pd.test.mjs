@@ -1,4 +1,4 @@
-// Real pi-agents hosts; run with PI_REMOTE_TEST_PD=1 when `pi-agents` is on PATH.
+// Real pi-agents hosts; run with PI_CODEX_REMOTE_TEST_PD=1 when `pi-agents` is on PATH.
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -8,7 +8,7 @@ import { sessionPids } from '../src/trash.mjs';
 import { model, setup, waitFor } from './harness.mjs';
 
 const executable = (process.env.PATH ?? '').split(':').map(dir => join(dir, 'pi-agents')).find(existsSync);
-const skip = process.env.PI_REMOTE_TEST_PD !== '1' ? 'set PI_REMOTE_TEST_PD=1' : !executable && 'pi-agents is not on PATH';
+const skip = process.env.PI_CODEX_REMOTE_TEST_PD !== '1' ? 'set PI_CODEX_REMOTE_TEST_PD=1' : !executable && 'pi-agents is not on PATH';
 // Hosts outlive their clients; a host's socket is named after its PID.
 const killHosts = f => { for (const pid of readdirSync(join(f.state, 'pi/agents/runtime')).flatMap(file => /^h-(\d+)\.sock$/.exec(file)?.[1] ?? [])) process.kill(Number(pid)); };
 const text = input => [{ type: 'text', text: input, text_elements: [] }];

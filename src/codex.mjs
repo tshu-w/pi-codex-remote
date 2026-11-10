@@ -25,7 +25,7 @@ export function executionSettings(params) {
   if (params.approvalPolicy != null && params.approvalPolicy !== 'never') throw invalid('Pi does not enforce Codex approval policies. Use Pi extensions or omit approvalPolicy.');
   if (params.approvalsReviewer != null && params.approvalsReviewer !== 'user') throw invalid('Delegated Codex approval reviewers are not supported.');
   if (params.dynamicTools != null && (!Array.isArray(params.dynamicTools) || params.dynamicTools.length)) throw invalid('Nonempty or malformed dynamicTools are unsupported; Pi uses its native tools.');
-  for (const key of ['baseInstructions', 'developerInstructions', 'serviceTier', 'personality', 'outputSchema', 'additionalContext', 'collaborationMode', 'environments', 'selectedCapabilityRoots', 'projectId', 'mockExperimentalField']) if (params[key] != null) throw invalid(`${key} overrides are not supported by Pi Remote.`);
+  for (const key of ['baseInstructions', 'developerInstructions', 'serviceTier', 'personality', 'outputSchema', 'additionalContext', 'collaborationMode', 'environments', 'selectedCapabilityRoots', 'projectId', 'mockExperimentalField']) if (params[key] != null) throw invalid(`${key} overrides are not supported by Codex Remote.`);
   if (params.summary != null && !['auto', 'concise', 'detailed'].includes(params.summary)) throw invalid('Unsupported summary control. Pi accepts auto, concise and detailed as display hints while retaining native reasoning output; disabling summaries is unsupported.');
   for (const [key, value] of Object.entries(params.config ?? {})) {
     if (['features.concurrent_reasoning_summaries', 'features.realtime_conversation'].includes(key) && typeof value === 'boolean') continue;
@@ -60,7 +60,7 @@ export function inputPrompt(input = [], attachments, owner) {
     else if (part?.type === 'image') {
       if (part.detail != null && part.detail !== 'auto') throw invalid('Pi does not enforce Codex image detail modes; omit detail or use auto.');
       const match = typeof part.url === 'string' && /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(part.url);
-      if (!match) throw invalid('Remote images must use PNG, JPEG, GIF, or WebP base64 data URLs.');
+      if (!match) throw invalid('Codex Remote images must use PNG, JPEG, GIF, or WebP base64 data URLs.');
       const bytes = Buffer.from(match[2], 'base64');
       if (!bytes.length || bytes.toString('base64').replace(/=+$/, '') !== match[2].replace(/=+$/, '') || bytes.length > 20 * 1024 * 1024 || images.length >= 10) throw invalid('Invalid or oversized image input (maximum 10 images, 20 MiB each).');
       images.push({ type: 'image', mimeType: match[1], data: match[2] });

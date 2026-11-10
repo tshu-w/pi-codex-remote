@@ -27,7 +27,7 @@ export default function codexRemote(pi: ExtensionAPI) {
     for (const image of event.images) {
       const decoded = await resizeImage(Buffer.from(image.data, "base64"), image.mimeType, ctx.model?.inputLimits?.images?.resize).catch(() => null);
       if (!decoded) {
-        ctx.ui.notify("Pi Remote rejected image: it could not be decoded within the selected model's image limits.", "error");
+        ctx.ui.notify("Codex Remote rejected image: it could not be decoded within the selected model's image limits.", "error");
         return { action: "handled" };
       }
     }
@@ -74,7 +74,7 @@ export default function codexRemote(pi: ExtensionAPI) {
             ...qr.trimEnd().split("\n"),
             `Manual code: ${pairing.manualCode || "unavailable"}`,
             `Expires: ${new Date(pairing.expiresAt).toLocaleString(undefined, { timeZoneName: "short" })}`,
-            "Remote tasks use Pi's local permissions, without Codex sandboxing.",
+            "Codex Remote tasks use Pi's local permissions, without Codex sandboxing.",
           ].join("\n"), 1, 0));
           return;
         }

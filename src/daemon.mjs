@@ -18,7 +18,7 @@ export function paths() {
 export function control(action, statePaths = paths()) {
   return new Promise((resolve, reject) => {
     const socket = createConnection(statePaths.socket);
-    const timer = setTimeout(() => { socket.destroy(); reject(new Error('Remote control request timed out')); }, 35000);
+    const timer = setTimeout(() => { socket.destroy(); reject(new Error('Codex Remote control request timed out')); }, 35000);
     let buffer = '';
     socket.on('connect', () => socket.write(`${JSON.stringify({ action })}\n`));
     socket.on('data', bytes => {
@@ -32,7 +32,7 @@ export function control(action, statePaths = paths()) {
       socket.end();
     });
     socket.on('error', reject);
-    socket.on('close', () => { clearTimeout(timer); if (!buffer.includes('\n')) reject(new Error('Remote control closed without a response')); });
+    socket.on('close', () => { clearTimeout(timer); if (!buffer.includes('\n')) reject(new Error('Codex Remote control closed without a response')); });
   });
 }
 
@@ -56,7 +56,7 @@ export async function start() {
     try { return await control('status', p); }
     catch (error) { if (!['ENOENT', 'ECONNREFUSED'].includes(error.code)) throw error; }
   }
-  throw new Error(`Remote daemon did not start. See ${p.log}`);
+  throw new Error(`Codex Remote daemon did not start. See ${p.log}`);
 }
 
 async function serve() {
@@ -68,8 +68,8 @@ async function serve() {
   catch (error) {
     if (error.code !== 'EEXIST') throw error;
     const pid = Number(await readFile(p.lock, 'utf8'));
-    if (!Number.isInteger(pid) || pid <= 0) throw new Error('Invalid Remote daemon lock; inspect it before restarting');
-    try { process.kill(pid, 0); throw new Error('Remote daemon is already running'); }
+    if (!Number.isInteger(pid) || pid <= 0) throw new Error('Invalid Codex Remote daemon lock; inspect it before restarting');
+    try { process.kill(pid, 0); throw new Error('Codex Remote daemon is already running'); }
     catch (failure) { if (failure.code !== 'ESRCH') throw failure; }
     await unlink(p.lock);
     lock = await open(p.lock, 'wx', 0o600);
@@ -122,7 +122,7 @@ async function serve() {
           if (action === 'status') result = { pid: process.pid, status: remote.status, error: remote.error, log: p.log };
           else if (action === 'pair') result = await remote.pair();
           else if (action === 'stop') result = { stopping: true };
-          else throw new Error(`Unknown Remote command: ${action}`);
+          else throw new Error(`Unknown Codex Remote command: ${action}`);
           socket.end(`${JSON.stringify({ result })}\n`);
           if (action === 'stop') socket.once('close', () => { void stop().catch(error => { console.error(error.message); process.exitCode = 1; }); });
         })().catch(error => socket.end(`${JSON.stringify({ error: error.message })}\n`));

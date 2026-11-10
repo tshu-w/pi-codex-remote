@@ -368,7 +368,7 @@ export const turnsMethods = {
 
   event(rpc, event) {
     const active = this.active.get(rpc.id);
-    if (event.type === 'extension_ui_request' && event.method === 'notify' && event.notifyType === 'error' && event.message?.startsWith('Pi Remote rejected image:')) {
+    if (event.type === 'extension_ui_request' && event.method === 'notify' && event.notifyType === 'error' && event.message?.startsWith('Codex Remote rejected image:')) {
       if (active) active.imageRejection = event.message;
       return;
     }
@@ -376,7 +376,7 @@ export const turnsMethods = {
       void rpc.send({ type: 'extension_ui_response', id: event.id, cancelled: true }).catch(error => {
         if (active) { active.error = error.message; this.finishNotification(active); }
       });
-      if (active) this.notify(rpc.id, 'error', { threadId: rpc.id, turnId: active.turn.id, willRetry: false, error: { message: `Pi dialog cancelled: ${event.title ?? event.method}. Remote dialog approvals are not supported.`, codexErrorInfo: null, additionalDetails: null } });
+      if (active) this.notify(rpc.id, 'error', { threadId: rpc.id, turnId: active.turn.id, willRetry: false, error: { message: `Pi dialog cancelled: ${event.title ?? event.method}. Codex Remote dialog approvals are not supported.`, codexErrorInfo: null, additionalDetails: null } });
       return;
     }
     if (event.type === 'process_exit') {

@@ -128,7 +128,7 @@ export const threadsHandlers = {
       if (!record) throw invalid('Thread not found.');
       workspaceSettings(params, record.cwd);
       const { header, entries } = await (this.history.loadSession ?? this.history.readHistory)(record.path);
-      if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can resume it.');
+      if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Codex Remote can resume it.');
       if (header.id !== params.threadId) throw invalid('Session history identity changed. Refresh the list before resuming.');
       this.inputEligibility.set(params.threadId, false);
       // pd joins hosted sessions; one open in a Pi outside a host fails on send.
@@ -195,7 +195,7 @@ export const threadsHandlers = {
     return historyPage(items, params, entry => entry.item.id, context, entry => !params.turnId || entry.turnId === params.turnId);
   },
   async 'thread/name/set'(params) {
-    if (!this.meta.owned?.[params.threadId]) throw invalid('Externally created Pi sessions are read-only in Remote. Fork before renaming.');
+    if (!this.meta.owned?.[params.threadId]) throw invalid('Externally created Pi sessions are read-only in Codex Remote. Fork before renaming.');
     const rpc = await this.rpc(params.threadId);
     await rpc.request('set_session_name', { name: params.name });
     await rpc.refresh();
@@ -209,7 +209,7 @@ export const threadsHandlers = {
   async 'thread/delete'({ threadId }) {
     await this.discover();
     await this.thread(threadId);
-    if (this.catalog.get(threadId)?.isSubAgent) throw invalid('Sub-agent threads are read-only in Remote.');
+    if (this.catalog.get(threadId)?.isSubAgent) throw invalid('Sub-agent threads are read-only in Codex Remote.');
     if (!this.meta.trashed?.[threadId]) await this.archive(threadId);
     for (const map of [this.meta.trashed, this.meta.archives, this.meta.owned, this.meta.parents, this.meta.queues]) if (map) delete map[threadId];
     const pending = this.meta.trashPending?.[threadId];
@@ -246,7 +246,7 @@ export const threadsHandlers = {
     return { status: 'unsubscribed' };
   },
   async 'thread/compact/start'(params, emit) {
-    if (!this.meta.owned?.[params.threadId]) throw invalid('Externally created Pi sessions are read-only in Remote. Fork before compacting.');
+    if (!this.meta.owned?.[params.threadId]) throw invalid('Externally created Pi sessions are read-only in Codex Remote. Fork before compacting.');
     if (this.active.has(params.threadId)) throw invalid('Cannot compact an active turn.');
     const rpc = await this.rpc(params.threadId);
     const { entries } = await rpc.request('get_entries');
@@ -267,7 +267,7 @@ export const threadsMethods = {
   async archive(threadId) {
     await this.discover();
     await this.thread(threadId);
-    if (this.catalog.get(threadId)?.isSubAgent) throw invalid('Sub-agent threads are read-only in Remote.');
+    if (this.catalog.get(threadId)?.isSubAgent) throw invalid('Sub-agent threads are read-only in Codex Remote.');
     if (this.meta.trashed?.[threadId] || this.meta.trashPending?.[threadId]) return {};
     const record = this.catalog.get(threadId);
     if (!record.path) throw invalid('Ephemeral sessions have no history file to move to Trash.');
@@ -419,7 +419,7 @@ export const threadsMethods = {
   },
 
   async rewind(threadId, beforeTurnId, emit) {
-    if (!this.meta.owned?.[threadId]) throw invalid('External Pi histories are read-only for revert. Fork before editing, or use a session already explicitly taken over by Remote.');
+    if (!this.meta.owned?.[threadId]) throw invalid('External Pi histories are read-only for revert. Fork before editing, or use a session already explicitly taken over by Codex Remote.');
     if (this.active.has(threadId)) throw invalid('Cannot revert an active turn. Stop it and wait for Pi to become idle.');
     if (this.meta.trashed?.[threadId] || this.meta.trashPending?.[threadId]) throw invalid('Session is archived. Unarchive it before editing.');
     await this.discover();
@@ -439,7 +439,7 @@ export const threadsMethods = {
     const target = entries.find(entry => entry.id === targetTurn?.id);
     if (target?.type !== 'message' || target.message.role !== 'user') throw invalid('Revert boundary is not an active user turn. Refresh the thread before retrying.');
     const { commands } = await rpc.request('get_commands');
-    if (!commands.some(command => command.name === revertCommand && command.source === 'extension')) throw invalid('The Remote history command is unavailable. Reload the Remote RPC extension before editing.');
+    if (!commands.some(command => command.name === revertCommand && command.source === 'extension')) throw invalid('The Codex Remote history command is unavailable. Reload the Codex Remote RPC extension before editing.');
     const operationId = randomUUID();
     let commandError;
     const unsubscribe = rpc.onEvent(event => {
@@ -448,7 +448,7 @@ export const threadsMethods = {
     try {
       const result = await rpc.request('prompt', { message: `/${revertCommand} ${JSON.stringify({ operationId, threadId, expectedLeafId: leafId, targetId: target.id })}` });
       if (commandError) throw new Error(commandError);
-      if (result?.disposition !== 'handled') throw new Error('Pi did not handle the Remote history command.');
+      if (result?.disposition !== 'handled') throw new Error('Pi did not handle the Codex Remote history command.');
       const snapshot = await rpc.request('get_entries');
       const marker = snapshot.entries.find(entry => entry.id === snapshot.leafId);
       const committed = entry => entry?.type === 'custom' && entry.customType === revertEntryType
@@ -484,7 +484,7 @@ export const threadsMethods = {
         if (!record) throw invalid('Thread not found.');
         workspaceSettings(params, record.cwd);
         const { header } = await this.history.readHistory(record.path);
-        if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can fork it.');
+        if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Codex Remote can fork it.');
         rpc = await this.sessions.open({ cwd: record.cwd, forkFrom: record.path });
       } else rpc = await this.rpc(params.threadId);
       providerSettings(params, rpc);
@@ -548,8 +548,8 @@ export const threadsMethods = {
     if (params.approvalPolicy != null && params.approvalPolicy !== 'never') throw invalid('Pi does not enforce Codex approval policies. Use Pi extensions or omit approvalPolicy.');
     if (params.approvalsReviewer != null && params.approvalsReviewer !== 'user') throw invalid('Delegated Codex approval reviewers are not supported.');
     if (params.sandboxPolicy != null && params.sandboxPolicy?.type !== 'dangerFullAccess') throw invalid('Pi does not enforce Codex sandbox policies. Use Pi permissions or omit sandboxPolicy.');
-    if (params.disabledPluginIds != null && (!Array.isArray(params.disabledPluginIds) || params.disabledPluginIds.length)) throw invalid('disabledPluginIds overrides are not supported by Pi Remote.');
-    if (params.multiAgentMode != null && params.multiAgentMode !== 'explicitRequestOnly') throw invalid('Proactive multi-agent mode is not supported by Pi Remote.');
+    if (params.disabledPluginIds != null && (!Array.isArray(params.disabledPluginIds) || params.disabledPluginIds.length)) throw invalid('disabledPluginIds overrides are not supported by Codex Remote.');
+    if (params.multiAgentMode != null && params.multiAgentMode !== 'explicitRequestOnly') throw invalid('Proactive multi-agent mode is not supported by Codex Remote.');
     const effort = executionSettings(params);
     if (params.model) modelIdentity(params.model);
     const external = !this.meta.owned?.[params.threadId];
@@ -579,10 +579,10 @@ export const threadsMethods = {
     await this.discover();
     const record = this.catalog.get(id);
     if (!record) throw invalid('Thread not found.');
-    if (record.isSubAgent) throw invalid('Sub-agent threads are read-only in Remote.');
+    if (record.isSubAgent) throw invalid('Sub-agent threads are read-only in Codex Remote.');
     workspaceSettings(params, record.cwd);
     const { header, entries } = await this.history.readHistory(record.path);
-    if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can resume it.');
+    if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Codex Remote can resume it.');
     if (header.id !== id) throw invalid('Session history identity changed. Refresh the list before sending tasks.');
     this.inputEligibility.delete(id);
     const hosted = this.sessions.hosted;

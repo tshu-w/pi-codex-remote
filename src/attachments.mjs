@@ -57,7 +57,7 @@ export class Attachments {
     this.prune();
     if (this.directories.has(path)) { this.directory(path, owner); return {}; }
     for (const [key, directory] of this.directories) {
-      if (directory.owner !== owner && (path.startsWith(`${key}/`) || key.startsWith(`${path}/`))) throw invalid('Attachment directory belongs to another Remote stream.');
+      if (directory.owner !== owner && (path.startsWith(`${key}/`) || key.startsWith(`${path}/`))) throw invalid('Attachment directory belongs to another Codex Remote stream.');
       for (const file of directory.files.keys()) if (path === file || path.startsWith(`${file}/`)) throw invalid('Attachment directory path contains an uploaded file.');
     }
     if (params.recursive === false && !this.roots.includes(dirname(path)) && !this.getMetadata({ path: dirname(path) }, owner).isDirectory) throw invalid('Attachment parent is not a directory.');

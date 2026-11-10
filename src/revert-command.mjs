@@ -4,11 +4,11 @@ export const revertEntryType = 'codex-remote.revert';
 // Registered everywhere: a pi-agents host runs it in interactive mode.
 export function registerRevertCommand(pi) {
   pi.registerCommand(revertCommand, {
-    description: 'Apply a validated Remote history branch change',
+    description: 'Apply a validated Codex Remote history branch change',
     handler: async (args, ctx) => {
       const request = JSON.parse(args);
       const { operationId, threadId, expectedLeafId, targetId } = request;
-      if (![operationId, threadId, expectedLeafId, targetId].every(value => typeof value === 'string' && value.length > 0)) throw new Error('Invalid Remote history command.');
+      if (![operationId, threadId, expectedLeafId, targetId].every(value => typeof value === 'string' && value.length > 0)) throw new Error('Invalid Codex Remote history command.');
       if (!ctx.isIdle() || ctx.hasPendingMessages()) throw new Error('Wait for Pi to become idle before editing history.');
       const manager = ctx.sessionManager;
       if (manager.getSessionId() !== threadId || manager.getLeafId() !== expectedLeafId) throw new Error('Pi history changed before revert. Refresh the thread before retrying.');

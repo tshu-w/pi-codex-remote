@@ -181,7 +181,7 @@ export class Sessions {
   }
 
   async open(options = {}) {
-    if (this.closed) throw new Error('Remote sessions are closed');
+    if (this.closed) throw new Error('Codex Remote sessions are closed');
     const path = options.sessionFile && await sessionPath(options.sessionFile);
     const requestedPath = options.sessionFile && resolve(options.sessionFile);
     const key = path?.exists ? path.path : this.aliases.get(requestedPath) ?? path?.path;
@@ -261,7 +261,7 @@ export class Sessions {
       await session.refresh();
       if (session.startupError) throw session.startupError;
       session.initializing = false;
-      if (this.closed) throw new Error('Remote sessions are closed');
+      if (this.closed) throw new Error('Codex Remote sessions are closed');
       return session;
     } catch (error) {
       await session.close();

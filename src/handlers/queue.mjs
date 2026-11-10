@@ -153,9 +153,9 @@ export const queueMethods = {
     if (queue.intent) throw uncertain(queue.intent);
     if (!this.meta.owned?.[threadId]) throw invalid('Send a task to take over the thread before starting a queued submission.');
     const rpc = await this.rpc(threadId);
-    if (this.queueClosing) throw invalid('Remote is shutting down.');
+    if (this.queueClosing) throw invalid('Codex Remote is shutting down.');
     await rpc.refresh();
-    if (this.queueClosing) throw invalid('Remote is shutting down.');
+    if (this.queueClosing) throw invalid('Codex Remote is shutting down.');
     if (this.active.has(threadId) || rpc.state.isStreaming || rpc.state.isCompacting || rpc.state.pendingMessageCount) throw invalid('Thread already has an active or pending turn.');
     const item = queue.items.find(value => queuedSubmissionId == null || value.id === queuedSubmissionId);
     if (!item) throw invalid(queuedSubmissionId == null ? 'Queue is empty.' : `Queued submission not found: ${queuedSubmissionId}`);
@@ -164,7 +164,7 @@ export const queueMethods = {
     const intent = { queuedSubmissionId: item.id, turnId: randomUUID() };
     await this.saveQueue(threadId, { ...queue, paused: false, intent });
     try {
-      if (this.queueClosing) throw invalid('Remote is shutting down.');
+      if (this.queueClosing) throw invalid('Codex Remote is shutting down.');
       // No client-specific attachment cache is involved: every input is self-contained.
       const turn = await this.startTurn({ threadId, input: item.input, clientUserMessageId: item.clientUserMessageId }, emit, { turnId: intent.turnId });
       await this.saveQueue(threadId, { items: queue.items.filter(value => value.id !== item.id), paused: false });

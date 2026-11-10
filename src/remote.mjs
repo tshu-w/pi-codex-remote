@@ -21,7 +21,7 @@ export function remotePaths(env = process.env) {
 
 export async function loadAuth(path) {
   const { tokens } = JSON.parse(await readFile(path, 'utf8'));
-  if (!tokens?.access_token || !tokens.account_id) throw new Error('Sign in through official ChatGPT/Codex before enabling Remote. Pi model credentials are not Remote credentials.');
+  if (!tokens?.access_token || !tokens.account_id) throw new Error('Sign in through official ChatGPT/Codex before enabling Codex Remote. Pi model credentials are not Codex Remote credentials.');
   const claims = JSON.parse(Buffer.from(tokens.access_token.split('.')[1], 'base64url'));
   if (claims.exp * 1000 <= Date.now()) throw new Error('Official Codex login expired. Refresh it through ChatGPT/Codex.');
   return { accessToken: tokens.access_token, accountId: tokens.account_id };
@@ -97,11 +97,11 @@ export class Remote {
     let enrollment;
     if (current?.accountId === auth.accountId) {
       enrollment = await this.post('server/refresh', auth.accessToken, { server_id: current.server_id, installation_id: this.state.installationId }, headers);
-      if (enrollment.server_id !== current.server_id || enrollment.environment_id !== current.environment_id) throw new Error('Remote refresh returned a different device');
+      if (enrollment.server_id !== current.server_id || enrollment.environment_id !== current.environment_id) throw new Error('Codex Remote refresh returned a different device');
     } else {
       enrollment = await this.post('server/enroll', auth.accessToken, { name: `${hostname()} · Pi`, os: process.platform, arch: process.arch, app_server_version: protocolMethods.version, installation_id: this.state.installationId }, headers);
     }
-    if (!enrollment.server_id || !enrollment.remote_control_token || !Number.isFinite(Date.parse(enrollment.expires_at))) throw new Error('Invalid Remote enrollment response');
+    if (!enrollment.server_id || !enrollment.remote_control_token || !Number.isFinite(Date.parse(enrollment.expires_at))) throw new Error('Invalid Codex Remote enrollment response');
     this.state.enrollment = { ...enrollment, accountId: auth.accountId };
     await this.persist();
     return this.state.enrollment;
@@ -152,7 +152,7 @@ export class Remote {
     await new Promise((resolve, reject) => {
       let open = false;
       let heartbeat;
-      let deadline = setTimeout(() => { socket.terminate(); reject(new Error('Remote connection timed out')); }, 30000);
+      let deadline = setTimeout(() => { socket.terminate(); reject(new Error('Codex Remote connection timed out')); }, 30000);
       socket.on('open', () => {
         open = true;
         clearTimeout(deadline);
@@ -171,7 +171,7 @@ export class Remote {
       socket.on('close', () => {
         clearInterval(heartbeat); clearTimeout(deadline);
         if (this.socket === socket) this.socket = undefined;
-        open ? resolve() : reject(new Error('Remote closed before connecting'));
+        open ? resolve() : reject(new Error('Codex Remote closed before connecting'));
       });
     });
   }
@@ -198,14 +198,14 @@ export class Remote {
     const key = `${clientId}\0${streamId}`;
     const seq = (this.sequences.get(key) || 0) + 1;
     const bytes = Buffer.from(JSON.stringify(event.message ?? event));
-    if (bytes.length > MAX_MESSAGE) throw new Error('Remote result exceeds 100 MiB');
+    if (bytes.length > MAX_MESSAGE) throw new Error('Codex Remote result exceeds 100 MiB');
     const base = { client_id: clientId, stream_id: streamId, seq_id: seq };
     const frames = [];
     if (bytes.length <= CHUNK_SIZE) frames.push({ ...base, ...event });
     else for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) frames.push({ ...base, type: 'server_message_chunk', segment_id: frames.length, segment_count: Math.ceil(bytes.length / CHUNK_SIZE), message_size_bytes: bytes.length, message_chunk_base64: bytes.subarray(offset, offset + CHUNK_SIZE).toString('base64') });
     let size = 0;
     for (const pendingFrames of this.pending.values()) for (const frame of pendingFrames) size += this.frameSize(frame);
-    if (size + frames.reduce((total, frame) => total + this.frameSize(frame), 0) > MAX_MESSAGE) throw new Error('Remote acknowledgement backlog exceeds 100 MiB; reconnect the phone');
+    if (size + frames.reduce((total, frame) => total + this.frameSize(frame), 0) > MAX_MESSAGE) throw new Error('Codex Remote acknowledgement backlog exceeds 100 MiB; reconnect the phone');
     this.sequences.set(key, seq);
     this.pending.set(`${key}\0${seq}`, frames);
     this.state.sequences = Object.fromEntries(this.sequences);
@@ -216,7 +216,7 @@ export class Remote {
 
   async receive(envelope) {
     const { client_id: clientId, stream_id: streamId, seq_id: seq } = envelope;
-    if (typeof clientId !== 'string' || !clientId || clientId.includes('\0')) throw new Error('Invalid Remote client');
+    if (typeof clientId !== 'string' || !clientId || clientId.includes('\0')) throw new Error('Invalid Codex Remote client');
     if (envelope.type === 'ping') {
       const status = this.clients.has(`${clientId}\0${streamId}`) ? 'active' : 'unknown';
       await this.emitEvent(clientId, streamId || randomUUID(), { type: 'pong', status });
@@ -230,11 +230,11 @@ export class Remote {
       await this.persist();
       return;
     }
-    if (typeof streamId !== 'string' || !streamId || streamId.includes('\0')) throw new Error('Remote message has no valid stream ID');
+    if (typeof streamId !== 'string' || !streamId || streamId.includes('\0')) throw new Error('Codex Remote message has no valid stream ID');
     const key = `${clientId}\0${streamId}`;
-    if (['ack', 'client_message', 'client_message_chunk'].includes(envelope.type) && (!Number.isSafeInteger(seq) || seq < 0)) throw new Error('Invalid Remote sequence ID');
+    if (['ack', 'client_message', 'client_message_chunk'].includes(envelope.type) && (!Number.isSafeInteger(seq) || seq < 0)) throw new Error('Invalid Codex Remote sequence ID');
     if (envelope.type === 'ack') {
-      if (envelope.segment_id !== undefined && (!Number.isInteger(envelope.segment_id) || envelope.segment_id < 0)) throw new Error('Invalid Remote acknowledgement');
+      if (envelope.segment_id !== undefined && (!Number.isInteger(envelope.segment_id) || envelope.segment_id < 0)) throw new Error('Invalid Codex Remote acknowledgement');
       if (seq > (this.sequences.get(key) ?? 0)) return;
       for (const [id, frames] of this.pending) {
         if (!id.startsWith(`${key}\0`) || frames[0].seq_id > seq) continue;
@@ -255,17 +255,17 @@ export class Remote {
       return;
     }
     if (envelope.type === 'client_message_chunk') {
-      if (!Number.isInteger(envelope.segment_count) || envelope.segment_count < 1 || envelope.segment_count > 1024 || !Number.isInteger(envelope.segment_id) || envelope.segment_id < 0 || envelope.segment_id >= envelope.segment_count || !Number.isSafeInteger(envelope.message_size_bytes) || envelope.message_size_bytes < 1 || envelope.message_size_bytes > MAX_MESSAGE || typeof envelope.message_chunk_base64 !== 'string') throw new Error('Invalid Remote chunk');
+      if (!Number.isInteger(envelope.segment_count) || envelope.segment_count < 1 || envelope.segment_count > 1024 || !Number.isInteger(envelope.segment_id) || envelope.segment_id < 0 || envelope.segment_id >= envelope.segment_count || !Number.isSafeInteger(envelope.message_size_bytes) || envelope.message_size_bytes < 1 || envelope.message_size_bytes > MAX_MESSAGE || typeof envelope.message_chunk_base64 !== 'string') throw new Error('Invalid Codex Remote chunk');
       const id = `${key}\0${seq}`;
-      if (!this.chunks.has(id) && this.chunks.size >= 16) throw new Error('Too many incomplete Remote messages');
+      if (!this.chunks.has(id) && this.chunks.size >= 16) throw new Error('Too many incomplete Codex Remote messages');
       const assembly = this.chunks.get(id) || { parts: Array(envelope.segment_count).fill(undefined), size: envelope.message_size_bytes, bytes: 0, receivedCount: 0 };
-      if (assembly.parts.length !== envelope.segment_count || assembly.size !== envelope.message_size_bytes) throw new Error('Remote chunk metadata changed');
+      if (assembly.parts.length !== envelope.segment_count || assembly.size !== envelope.message_size_bytes) throw new Error('Codex Remote chunk metadata changed');
       const part = Buffer.from(envelope.message_chunk_base64, 'base64');
       let used = 0;
       for (const item of this.chunks.values()) used += item.bytes;
-      if (used + part.length - (assembly.parts[envelope.segment_id]?.length || 0) > MAX_MESSAGE) throw new Error('Remote chunk backlog exceeds 100 MiB');
+      if (used + part.length - (assembly.parts[envelope.segment_id]?.length || 0) > MAX_MESSAGE) throw new Error('Codex Remote chunk backlog exceeds 100 MiB');
       const previous = assembly.parts[envelope.segment_id];
-      if (previous && !previous.equals(part)) throw new Error('Remote chunk content changed');
+      if (previous && !previous.equals(part)) throw new Error('Codex Remote chunk content changed');
       if (previous === undefined) {
         assembly.bytes += part.length;
         assembly.receivedCount++;
@@ -275,11 +275,11 @@ export class Remote {
       if (assembly.receivedCount !== assembly.parts.length) return;
       this.chunks.delete(id);
       const bytes = Buffer.concat(assembly.parts);
-      if (bytes.length !== assembly.size) throw new Error('Remote chunk size mismatch');
+      if (bytes.length !== assembly.size) throw new Error('Codex Remote chunk size mismatch');
       envelope = { ...envelope, type: 'client_message', message: JSON.parse(bytes.toString()) };
     }
-    if (envelope.type !== 'client_message') throw new Error(`Unsupported Remote envelope: ${envelope.type}`);
-    if (!envelope.message || typeof envelope.message !== 'object' || Array.isArray(envelope.message)) throw new Error('Invalid Remote message');
+    if (envelope.type !== 'client_message') throw new Error(`Unsupported Codex Remote envelope: ${envelope.type}`);
+    if (!envelope.message || typeof envelope.message !== 'object' || Array.isArray(envelope.message)) throw new Error('Invalid Codex Remote message');
     const duplicate = this.received.get(key)?.has(seq) || seq <= (this.incoming.get(key) ?? -1) - 1024;
     const existing = this.clients.get(key);
     let client = existing;
@@ -298,7 +298,7 @@ export class Remote {
     }
     if (duplicate) {
       if (!this.runtimeReceived.get(key)?.has(seq) && envelope.message.id != null) {
-        await client.emit({ id: envelope.message.id, error: { code: -32000, message: 'Earlier request outcome is unavailable after Remote restart or delivery failure. It may have executed. Reload thread history and current state before retrying any action.' } });
+        await client.emit({ id: envelope.message.id, error: { code: -32000, message: 'Earlier request outcome is unavailable after Codex Remote restart or delivery failure. It may have executed. Reload thread history and current state before retrying any action.' } });
       }
       return;
     }

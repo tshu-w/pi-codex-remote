@@ -179,7 +179,7 @@ export class Protocol {
 
   async rpc(threadId) {
     await this.discover();
-    if (this.catalog.get(threadId)?.isSubAgent) throw invalid('Sub-agent threads are read-only in Remote.');
+    if (this.catalog.get(threadId)?.isSubAgent) throw invalid('Sub-agent threads are read-only in Codex Remote.');
     if (this.meta.trashed?.[threadId] || this.meta.trashPending?.[threadId]) throw invalid('Session is archived. Unarchive it before resuming or sending tasks.');
     const cached = this.loaded.get(threadId);
     if (cached && !cached.failure) {
@@ -200,7 +200,7 @@ export class Protocol {
       const record = this.catalog.get(threadId);
       if (!record) throw invalid(`Thread not found: ${threadId}`);
       const { header } = await this.history.readHistory(record.path);
-      if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can resume it.');
+      if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Codex Remote can resume it.');
       if (header.id !== threadId) throw invalid('Session history identity changed. Refresh the list before resuming.');
       if (!this.sessions.hosted) await this.trash.assertSessionNotOpen(record.path);
       const rpc = await this.openSaved(record);
@@ -219,7 +219,7 @@ export class Protocol {
 
   // pd cannot join a session that a Pi outside its hosts has open: it fails, or may start a second Pi on the file.
   async openSaved(record) {
-    const conflict = () => invalid('Session is open in a Pi outside pi-agents, so Remote cannot join it. Quit that Pi first, then retry.');
+    const conflict = () => invalid('Session is open in a Pi outside pi-agents, so Codex Remote cannot join it. Quit that Pi first, then retry.');
     let rpc;
     try { rpc = await this.sessions.open({ cwd: record.cwd, sessionFile: record.path }); }
     catch (error) {
@@ -259,7 +259,7 @@ export class Protocol {
       await this.discover();
       return read();
     });
-    if (history.header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Remote can display it.');
+    if (history.header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Codex Remote can display it.');
     if (history.header.id !== threadId) throw invalid('Session history identity changed. Refresh the list before retrying.');
     return history;
   }

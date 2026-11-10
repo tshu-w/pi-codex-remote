@@ -28,7 +28,7 @@ export const methodStatus = {
   'thread/archive': ['implemented', 'Moves the session file to the macOS Trash'],
   'thread/unarchive': ['implemented', 'Restores the session file from the Trash'],
   'thread/unsubscribe': ['implemented'],
-  'thread/delete': ['implemented', 'Moves the session file to the macOS Trash and removes the thread from Remote'],
+  'thread/delete': ['implemented', 'Moves the session file to the macOS Trash and removes the thread from Codex Remote'],
   'thread/search': ['implemented', 'Session names and message text on the active branch'],
   'thread/searchOccurrences': ['implemented', 'Visible user messages and final assistant messages, with UTF-16 match ranges and turn cursors'],
   'thread/timeline/list': ['implemented', 'Ordinary history only; newest page first, chronological order within each page'],
