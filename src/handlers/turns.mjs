@@ -151,24 +151,20 @@ export const turnsMethods = {
   rpcEntries(rpc) {
     const read = (this.entryReads.get(rpc) ?? Promise.resolve()).catch(() => {}).then(async () => {
       const known = rpc.knownEntries;
-      const since = known?.entries.at(-1)?.id;
+      const since = known?.at(-1)?.id;
       const tail = since === undefined ? undefined : await rpc.request('get_entries', { since }).catch(error => {
         // A switched session or another branch file no longer has it.
         if (/Entry not found/.test(error.message)) return undefined;
         throw error;
       });
-      let result;
-      // A Pi that ignores `since` returns them all.
-      if (tail && !known.ids.has(tail.entries[0]?.id)) {
-        for (const entry of tail.entries) known.ids.add(entry.id);
-        result = { entries: tail.entries.length ? known.entries.concat(tail.entries) : known.entries, leafId: tail.leafId };
-        rpc.messageEndsAt?.set(result, rpc.messageEndsAt.get(tail));
-      } else {
-        result = tail ?? await rpc.request('get_entries');
-        rpc.knownEntries = { entries: result.entries, ids: new Set(result.entries.map(entry => entry.id)) };
+      if (!tail) {
+        const result = await rpc.request('get_entries');
+        rpc.knownEntries = result.entries;
         return result;
       }
-      rpc.knownEntries = { entries: result.entries, ids: known.ids };
+      const result = { entries: tail.entries.length ? known.concat(tail.entries) : known, leafId: tail.leafId };
+      rpc.messageEndsAt?.set(result, rpc.messageEndsAt.get(tail));
+      rpc.knownEntries = result.entries;
       return result;
     });
     this.entryReads.set(rpc, read);
