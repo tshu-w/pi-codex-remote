@@ -23,7 +23,8 @@ export default function codexRemote(pi: ExtensionAPI) {
 
   pi.on("input", async (event, ctx) => {
     if (ctx.mode === "tui" && event.source === "interactive") ctx.ui.setWidget("codex-remote-pair", undefined);
-    if (event.source !== "rpc" || !event.images?.length) return;
+    // Codex Remote's input arrives over RPC, from its own Pi or a pi-agents host, so it is not told apart from other RPC clients.
+    if (event.source !== "rpc" || !event.images?.length || pi.getSettings().images?.autoResize === false) return;
     for (const image of event.images) {
       const decoded = await resizeImage(Buffer.from(image.data, "base64"), image.mimeType, ctx.model?.inputLimits?.images?.resize).catch(() => null);
       if (!decoded) {
