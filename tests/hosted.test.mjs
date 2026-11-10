@@ -1,4 +1,4 @@
-// pi-agents hosts, with a fake RPC client standing in for `pd --mode rpc`.
+// pi-agents hosts, with a fake RPC client standing in for `pi-agents --mode rpc`.
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -33,7 +33,7 @@ class HostedRpc {
   async request(type, params = {}) {
     this.requests.push(params.since === undefined ? type : `${type} since ${params.since}`);
     this.onRequest?.(type);
-    // Pi answers after the events already in flight, as through pd's relay.
+    // Pi answers after the events already in flight, as through pi-agents' relay.
     await tick();
     if (type === 'get_state') return structuredClone(this.state);
     if (type === 'get_entries') {
@@ -297,7 +297,7 @@ test('opening a released hosted thread joins its running host, and only a runnin
   await waitFor(() => rpc.closed, 'released');
   const host = new HostedRpc(id, rpc.sessionFile, rpc.cwd);
   let opened = 0;
-  // Probes run Pi directly; only joining a session goes through pd.
+  // Probes run Pi directly; only joining a session goes through pi-agents.
   protocol.sessions.open = async options => { if (!options.ephemeral) opened++; return host; };
   const viewer = phone(protocol);
   // No host runs the session: viewing reads its history.
@@ -362,7 +362,7 @@ test('a turn whose host stopped without events still finishes', async t => {
   const { rpc, client } = await setup(t, { releaseDelayMs: 50 });
   rpc.emit({ type: 'agent_start' });
   const { params: { turn } } = await client.notification('turn/started');
-  // pd reopened the session: Pi is idle and no event or failed request reports it.
+  // pi-agents reopened the session: Pi is idle and no event or failed request reports it.
   rpc.state.isStreaming = false;
   assert.equal((await client.notification('turn/completed', params => params.turn.id === turn.id)).params.turn.id, turn.id);
 });

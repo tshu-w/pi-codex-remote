@@ -83,7 +83,7 @@ test('Remote does not add a Pi to a session open outside pi-agents', { skip, tim
   await waitFor(() => readdirSync(join(f.state, 'pi/agents/runtime/locks')).some(file => file.includes(`.${local.child.pid}-`)), 'local Pi locked the session');
   const resumed = await client.request('thread/resume', { threadId: thread.id });
   assert.equal(resumed.thread.canAcceptDirectInput, true);
-  // pd fails, joins that Pi, or starts a second Pi on the file; Remote never sends to a second Pi.
+  // pi-agents fails, joins that Pi, or starts a second Pi on the file; Remote never sends to a second Pi.
   const response = await client.raw('turn/start', { threadId: thread.id, input: text('second') });
   if (!response.error) {
     assert.deepEqual(await sessionPids(thread.path), [local.child.pid]);

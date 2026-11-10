@@ -63,7 +63,7 @@ export async function loadSession(sessionFile) {
 export async function readHistory(sessionFile) {
   const path = resolve(sessionFile);
   const { history } = await loadHistory(path, await stat(path));
-  // Callers previously owned freshly parsed objects, including nested message content.
+  // Each caller gets its own copy, nested message content included, and may change it.
   return structuredClone(history);
 }
 

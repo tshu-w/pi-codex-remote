@@ -308,7 +308,7 @@ export const turnsMethods = {
     active.messageIndex = active.messages.length - 1;
   },
 
-  // A host that stops is reopened by pd: its turn ends without events, and only pending requests fail.
+  // A host that stops is reopened by pi-agents: its turn ends without events, and only pending requests fail.
   reconcileTurn(active) {
     // Work in flight, such as a prompt, steer or `!` command, settles the turn itself.
     if (!this.sessions.hosted || active.kind || active.finishing || active.finished || active.rpc.pending.size) return;

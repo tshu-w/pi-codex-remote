@@ -76,7 +76,7 @@ async function serve() {
   }
   await lock.writeFile(`${process.pid}\n`);
   await lock.close();
-  // `pi-agents` is pd's unambiguous name; with it, saved sessions join their hosts instead of running a private Pi.
+  // With `pi-agents` on PATH, saved sessions join their hosts instead of running a private Pi.
   const hosted = (process.env.PATH ?? '').split(':').some(dir => { try { accessSync(join(dir, 'pi-agents'), constants.X_OK); return true; } catch { return false; } });
   console.error(`${new Date().toISOString()} sessions ${hosted ? 'pi-agents hosts' : 'pi'}`);
   const sessions = new Sessions({ hosted: hosted ? { command: 'pi-agents' } : undefined });

@@ -131,7 +131,7 @@ export const threadsHandlers = {
       if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Codex Remote can resume it.');
       if (header.id !== params.threadId) throw invalid('Session history identity changed. Refresh the list before resuming.');
       this.inputEligibility.set(params.threadId, false);
-      // pd joins hosted sessions; one open in a Pi outside a host fails on send.
+      // pi-agents joins hosted sessions; one open in a Pi outside a host fails on send.
       if (!record.isSubAgent && !this.meta.trashed?.[params.threadId] && this.sessions.hosted) this.inputEligibility.set(params.threadId, true);
       else if (!record.isSubAgent && !this.meta.trashed?.[params.threadId]) {
         try {
@@ -428,7 +428,7 @@ export const threadsMethods = {
     const wireTurns = await this.turns(threadId);
     if (!wireTurns.some(turn => turn.id === beforeTurnId)) throw invalid('beforeTurnId is not in the active thread history. Refresh the thread before retrying.');
     const cached = this.loaded.get(threadId);
-    // One writer: under pd it is the host, which revert joins.
+    // One writer: under pi-agents it is the host, which revert joins.
     if (!this.sessions.hosted) await this.trash.assertSessionNotOpen(record.path, { ignorePids: cached?.child?.pid ? [cached.child.pid] : [] });
     const rpc = await this.rpc(threadId);
     if (rpc.state.isStreaming || rpc.state.isCompacting || rpc.state.pendingMessageCount > 0) throw invalid('Wait for Pi to finish active work, compaction, and queued messages before editing.');

@@ -217,7 +217,7 @@ export class Protocol {
     finally { this.opening.delete(threadId); }
   }
 
-  // pd cannot join a session that a Pi outside its hosts has open: it fails, or may start a second Pi on the file.
+  // pi-agents cannot join a session that a Pi outside its hosts has open: it fails, or may start a second Pi on the file.
   async openSaved(record) {
     const conflict = () => invalid('Session is open in a Pi outside pi-agents, so Codex Remote cannot join it. Quit that Pi first, then retry.');
     let rpc;
