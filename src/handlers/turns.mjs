@@ -163,7 +163,7 @@ export const turnsMethods = {
         return result;
       }
       const result = { entries: tail.entries.length ? known.concat(tail.entries) : known, leafId: tail.leafId };
-      rpc.messageEndsAt?.set(result, rpc.messageEndsAt.get(tail));
+      rpc.messageEndsAt.set(result, rpc.messageEndsAt.get(tail));
       rpc.knownEntries = result.entries;
       return result;
     });
@@ -311,7 +311,7 @@ export const turnsMethods = {
   // A host that stops is reopened by pd: its turn ends without events, and only pending requests fail.
   reconcileTurn(active) {
     // Work in flight, such as a prompt, steer or `!` command, settles the turn itself.
-    if (!this.sessions.hosted || active.kind || active.finishing || active.finished || active.rpc.pending?.size) return;
+    if (!this.sessions.hosted || active.kind || active.finishing || active.finished || active.rpc.pending.size) return;
     void this.finish(active).catch(error => {
       active.error = error.message;
       this.finishNotification(active);

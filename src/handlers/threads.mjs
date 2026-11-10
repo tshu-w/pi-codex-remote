@@ -127,7 +127,7 @@ export const threadsHandlers = {
       const record = this.catalog.get(params.threadId);
       if (!record) throw invalid('Thread not found.');
       workspaceSettings(params, record.cwd);
-      const { header, entries } = await (this.history.loadSession ?? this.history.readHistory)(record.path);
+      const { header, entries } = await this.history.loadSession(record.path);
       if (header.version !== 3) throw invalid('Legacy Pi history requires a local migration before Codex Remote can resume it.');
       if (header.id !== params.threadId) throw invalid('Session history identity changed. Refresh the list before resuming.');
       this.inputEligibility.set(params.threadId, false);

@@ -33,7 +33,7 @@ export class Protocol {
     } });
     const previewed = options => ({ ...options, imageMapper: options?.senderThreadId ? block => this.previews.image(block, options.senderThreadId) : undefined });
     this.history = { ...history, projectTurns: (entries, options) => history.projectTurns(entries, previewed(options)),
-      projectHistory: (entries, options) => history.projectHistory?.(entries, previewed(options)) ?? { turns: history.projectTurns(entries, previewed(options)) } };
+      projectHistory: (entries, options) => history.projectHistory(entries, previewed(options)) };
     this.cwd = resolve(cwd);
     this.stateDir = stateDir;
     this.attachments = new Attachments({ stateDir });
@@ -131,7 +131,7 @@ export class Protocol {
   async discover({ cached = false } = {}) {
     if (this.discovery) return this.discovery;
     if (cached && this.catalogReady && this.catalogWatcher && !this.catalogStale) return;
-    this.catalogWatcher ??= this.history.watchSessions?.(() => { this.catalogStale = true; }, () => { this.catalogWatcher = null; }) ?? null;
+    this.catalogWatcher ??= this.history.watchSessions(() => { this.catalogStale = true; }, () => { this.catalogWatcher = null; });
     this.catalogStale = false;
     this.discovery = this.refreshCatalog();
     try { await this.discovery; this.catalogReady = true; }
@@ -251,7 +251,7 @@ export class Protocol {
     const read = async () => {
       const record = this.catalog.get(threadId);
       if (!record) throw invalid(`Thread not found: ${threadId}`);
-      return (this.history.loadSession ?? this.history.readHistory)(record.path);
+      return this.history.loadSession(record.path);
     };
     // A session moved since the catalog was read is found again.
     const history = await read().catch(async error => {

@@ -22,7 +22,7 @@ test('desktop legacy auth handshake uses Pi-managed auth without exporting or re
   const protocol = new Protocol({
     stateDir, cwd: stateDir,
     sessions: { open: unavailable, close: async () => {} },
-    history: { listSessions: async () => [], readHistory: unavailable, projectTurns: () => [] },
+    history: { listSessions: async () => [], readHistory: unavailable, loadSession: unavailable, projectTurns: () => [], projectHistory: () => ({ turns: [] }), watchSessions: () => null },
   });
   t.after(() => protocol.close());
   const output = [];
@@ -49,7 +49,7 @@ test('exactly the requests in the method table are routed', async t => {
   const protocol = new Protocol({
     stateDir, cwd: stateDir,
     sessions: { open: unavailable, close: async () => {} },
-    history: { listSessions: async () => [], readHistory: unavailable, projectTurns: () => [] },
+    history: { listSessions: async () => [], readHistory: unavailable, loadSession: unavailable, projectTurns: () => [], projectHistory: () => ({ turns: [] }), watchSessions: () => null },
     trash: { assertSessionNotOpen: async () => {} },
   });
   t.after(() => protocol.close());

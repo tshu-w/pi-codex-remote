@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setImmediate as tick } from 'node:timers/promises';
 import test from 'node:test';
-import { projectTurns } from '../src/history.mjs';
+import { projectHistory, projectTurns } from '../src/history.mjs';
 import { Protocol } from '../src/protocol.mjs';
 import { phone, waitFor } from './harness.mjs';
 
@@ -13,7 +13,7 @@ const model = { provider: 'fixture', id: 'scripted', input: ['text'] };
 
 class HostedRpc {
   constructor(id, sessionFile, cwd) {
-    Object.assign(this, { cwd, entries: [], requests: [], listeners: new Set(), messageEnds: 0, messageEndsAt: new WeakMap(), child: { pid: -1 } });
+    Object.assign(this, { cwd, entries: [], requests: [], listeners: new Set(), messageEnds: 0, messageEndsAt: new WeakMap(), pending: new Map(), child: { pid: -1 } });
     this.state = { sessionId: id, sessionFile, model, thinkingLevel: 'off', isStreaming: false, isCompacting: false, pendingMessageCount: 0 };
   }
   get id() { return this.state.sessionId; }
@@ -75,9 +75,10 @@ async function setup(t, { releaseDelayMs = 60_000, running, children = 0 } = {})
     async sessionPids() { return trash.open ? [1] : []; },
     async trashSession(file) { trash.moved.push(file); return join(root, 'Trash.jsonl'); },
   };
+  const readHistory = async file => file === path ? { header: { type: 'session', version: 3, id }, entries: structuredClone(rpc.entries) } : { header: { type: 'session', version: 3, id: agents.find(agent => agent.path === file).id }, entries: [] };
   const protocol = new Protocol({
     sessions: { hosted: { command: 'pi-agents' }, persistedPaths: new Map([[path, rpc]]), open: async () => rpc, close: async () => {} },
-    history: { listSessions: async () => structuredClone([record, ...agents]), readHistory: async file => file === path ? { header: { type: 'session', version: 3, id }, entries: structuredClone(rpc.entries) } : { header: { type: 'session', version: 3, id: agents.find(agent => agent.path === file).id }, entries: [] }, readSearchText: async () => '', projectTurns },
+    history: { listSessions: async () => structuredClone([record, ...agents]), readHistory, loadSession: readHistory, readSearchText: async () => '', projectTurns, projectHistory, watchSessions: () => null },
     cwd: root, stateDir, trash, releaseDelayMs,
   });
   t.after(() => protocol.close());
