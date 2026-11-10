@@ -5,7 +5,7 @@ import test from 'node:test';
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
     let source;
-    if (specifier === '@earendil-works/pi-coding-agent') source = 'export const generateUnifiedPatch = () => {}; export const resizeImage = () => { throw new Error("Unexpected image resize"); };';
+    if (specifier === '@earendil-works/pi-coding-agent') source = 'export const resizeImage = () => { throw new Error("Unexpected image resize"); };';
     if (specifier === '@earendil-works/pi-tui') source = 'export class Loader {} export class Text {}';
     if (specifier === './src/daemon.mjs') source = 'export const control = () => { throw new Error("Input must not control the relay"); }; export const start = control;';
     return source ? { url: `data:text/javascript,${encodeURIComponent(source)}`, shortCircuit: true } : nextResolve(specifier, context);
