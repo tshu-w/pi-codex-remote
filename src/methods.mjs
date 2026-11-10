@@ -1,4 +1,4 @@
-// Support status of every Codex app-server request Pi Remote answers. Requests not
+// Support status of every Codex app-server request Codex Remote answers. Requests not
 // listed here return -32601. METHODS.md is generated from this table and the vendored
 // schema by `node scripts/methods-doc.mjs`.
 //   implemented: mapped to Pi, possibly a subset that rejects unsupported parameters
