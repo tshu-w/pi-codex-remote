@@ -1,5 +1,5 @@
 import { open, readFile, readdir, realpath, stat } from 'node:fs/promises';
-import { realpathSync, watch } from 'node:fs';
+import { readFileSync, realpathSync, watch } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { noticeItems, toolItem, updateToolItem } from './items.mjs';
@@ -43,10 +43,8 @@ function fileVersion(metadata) {
   return [metadata.dev, metadata.ino, metadata.size, metadata.mtimeMs, metadata.ctimeMs].join(':');
 }
 
-function agentDir() {
-  const path = process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent');
-  return path.startsWith('~/') ? join(homedir(), path.slice(2)) : path;
-}
+const expandHome = path => path === '~' ? homedir() : path.startsWith('~/') ? join(homedir(), path.slice(2)) : path;
+const agentDir = () => expandHome(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'));
 
 export async function historyPath(file) {
   const absolute = resolve(file);
@@ -162,7 +160,14 @@ export function sessionSettings(entries) {
   };
 }
 
-const sessionRoot = () => process.env.PI_CODING_AGENT_SESSION_DIR || join(agentDir(), 'sessions');
+// As Pi: the environment, then the global `sessionDir` setting, then the agent directory. The daemon runs in HOME, so relative settings resolve from there, as for a Pi started there.
+function sessionRoot() {
+  let setting;
+  try { setting = JSON.parse(readFileSync(join(agentDir(), 'settings.json'), 'utf8')).sessionDir; }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const configured = process.env.PI_CODING_AGENT_SESSION_DIR || setting;
+  return configured ? resolve(expandHome(configured)) : join(agentDir(), 'sessions');
+}
 
 // Calls `onChange` when a session file is added, written, moved or removed, or a directory of them is moved;
 // `onClose` when that can no longer be told. Other files there, such as logs, do not count.

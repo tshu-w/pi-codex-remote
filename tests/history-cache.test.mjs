@@ -129,3 +129,21 @@ test('a grown session is read from where it ended, and a rewritten one in full, 
   assert.equal(f.reads(), reads + 1);
   assert.equal(projectHistory(rewritten.entries, { previous: extended }).turns[0].items[0].content[0].text, 'first, rewritten');
 });
+
+test('sessions follow the global sessionDir setting when the environment sets none', async t => {
+  const agent = await fs.mkdtemp(join(tmpdir(), 'history-agent-'));
+  const saved = { dir: process.env.PI_CODING_AGENT_DIR, sessions: process.env.PI_CODING_AGENT_SESSION_DIR };
+  t.after(async () => {
+    for (const [key, value] of [['PI_CODING_AGENT_DIR', saved.dir], ['PI_CODING_AGENT_SESSION_DIR', saved.sessions]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await fs.rm(agent, { recursive: true, force: true });
+  });
+  process.env.PI_CODING_AGENT_DIR = agent;
+  delete process.env.PI_CODING_AGENT_SESSION_DIR;
+  await fs.mkdir(join(agent, 'custom'));
+  await fs.writeFile(join(agent, 'settings.json'), JSON.stringify({ sessionDir: join(agent, 'custom') }));
+  await fs.writeFile(join(agent, 'custom', 'session.jsonl'), jsonl(header, message('first')));
+  assert.deepEqual((await listSessions()).map(session => session.path), [join(agent, 'custom', 'session.jsonl')]);
+});
