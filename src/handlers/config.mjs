@@ -40,7 +40,7 @@ export const configHandlers = {
   },
   async 'permissionProfile/list'(params) {
     return offsetPage([
-      { id: ':danger-full-access', description: 'Native Pi execution without a Codex sandbox; Pi local permission hooks remain enforced.', allowed: true },
+      { id: ':danger-full-access', description: "Pi execution without a Codex sandbox, under Pi's own permission extensions.", allowed: true },
     ], params, 1);
   },
   async 'collaborationMode/list'() { return { data: [] }; },

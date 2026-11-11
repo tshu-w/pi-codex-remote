@@ -131,7 +131,7 @@ export class RpcSession {
     const id = params.id ?? `remote-${++this.nextId}`;
     const data = await new Promise((resolveRequest, reject) => {
       const timer = setTimeout(() => {
-        this.fail(new Error(`Pi RPC ${type} timed out; its action may already have executed`));
+        this.fail(new Error('Pi did not respond in time. The action may have run; check the thread before retrying.'));
         void this.close();
       }, timeoutMs);
       this.pending.set(id, { resolve: resolveRequest, reject, timer });
@@ -188,11 +188,11 @@ export class Sessions {
     if (key && this.paths.has(key)) {
       const cached = this.paths.get(key);
       const exists = path.exists || (key !== path.path && (await sessionPath(key)).exists);
-      if (cached.failure || cached.closing) throw new Error(`Pi RPC session for ${key} is unavailable (failed or closing). Wait for shutdown to finish before retrying; refresh the history list.`);
+      if (cached.failure || cached.closing) throw new Error('Pi for this session is shutting down. Refresh the list and retry once it has stopped.');
       this.aliases.set(requestedPath, key);
       if (!cached.ephemeral && exists) this.persistedPaths.set(key, cached);
       if (this.persistedPaths.get(key) === cached && !exists) {
-        if (cached.state.isStreaming || cached.state.isCompacting) throw new Error(`Pi session history is no longer on disk: ${key}. Its active or compacting runtime was not closed. Wait until it is idle and refresh the history list; restore the file locally if needed.`);
+        if (cached.state.isStreaming || cached.state.isCompacting) throw new Error("This session's file was removed while Pi was still running it. Wait until it is idle, then refresh the list; restore the file to keep using it.");
         await this.closeMissing(cached, key);
       }
       return cached;
@@ -213,7 +213,7 @@ export class Sessions {
   }
 
   async closeMissing(rpc, file) {
-    const error = new Error(`Pi session history is no longer on disk: ${file}. Its cached runtime was closed. Refresh the history list; restore the file locally before retrying if needed.`);
+    const error = new Error(`Pi session history is no longer on disk: ${file}. Refresh the history list; restore the file locally before retrying if needed.`);
     rpc.fail(error);
     await rpc.close();
     throw error;

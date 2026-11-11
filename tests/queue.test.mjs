@@ -77,7 +77,7 @@ test('dispatch uncertainty survives restart and requires explicit deletion', { t
   const second = f.start();
   await second.client.request('thread/resume', { threadId, excludeTurns: true });
   const blocked = await second.client.raw('thread/queue/start', { threadId });
-  assert.match(blocked.error.message, /uncertain.*history.*delete/i);
+  assert.match(blocked.error.message, /may already have been sent.*Check the thread/);
   assert.deepEqual((await f.calls()).map(call => call.prompt), ['seed']);
   assert.equal((await second.client.request('thread/queue/list', { threadId })).data[0].id, 'uncertain');
   await second.client.request('thread/queue/delete', { threadId, queuedSubmissionId: 'uncertain' });

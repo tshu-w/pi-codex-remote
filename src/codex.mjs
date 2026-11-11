@@ -17,7 +17,7 @@ export function workspaceSettings(params, cwd) {
 export function executionSettings(params) {
   if (params.disabledPluginIds != null && (!Array.isArray(params.disabledPluginIds) || params.disabledPluginIds.length)) throw invalid('Nonempty or malformed disabledPluginIds are unsupported; Pi plugins cannot be disabled by the desktop client.');
   if (params.permissions != null) {
-    if (params.permissions !== ':danger-full-access') throw invalid('Only the :danger-full-access permission profile is supported; Pi local permission hooks remain enforced.');
+    if (params.permissions !== ':danger-full-access') throw invalid('Only the :danger-full-access permission profile is supported.');
     if (params.sandbox != null || params.sandboxPolicy != null) throw invalid('permissions cannot be combined with sandbox or sandboxPolicy.');
   }
   if (params.sandbox != null && params.sandbox !== 'danger-full-access' && params.sandbox.type !== 'dangerFullAccess') throw invalid('Pi does not enforce Codex sandbox policies. Use Pi permissions or omit sandbox.');

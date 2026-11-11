@@ -305,7 +305,7 @@ export class Remote {
     }
     if (duplicate) {
       if (!this.runtimeReceived.get(key)?.has(seq) && envelope.message.id != null) {
-        await client.emit({ id: envelope.message.id, error: { code: -32000, message: 'Earlier request outcome is unavailable after Codex Remote restart or delivery failure. It may have executed. Reload thread history and current state before retrying any action.' } });
+        await client.emit({ id: envelope.message.id, error: { code: -32000, message: 'Codex Remote restarted before answering this request. It may have run; reload the thread before retrying.' } });
       }
       return;
     }

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { invalid, inputPrompt } from '../codex.mjs';
 
 const emptyQueue = () => ({ items: [], paused: false });
-const uncertain = intent => invalid(`Queued submission ${intent.queuedSubmissionId} has an uncertain dispatch outcome. Inspect thread history before deleting it with thread/queue/delete and recreating it if needed; it will not be retried automatically.`);
+const uncertain = () => invalid('This queued message may already have been sent. Check the thread before deleting or resending it.');
 
 function durableInput(input) {
   if (!Array.isArray(input) || input.some(part => !['text', 'image'].includes(part?.type))) {
@@ -39,7 +39,7 @@ export const queueHandlers = {
   async 'thread/queue/update'(params, emit) {
     const { threadId, queuedSubmissionId } = params;
     const queue = await this.requireQueue(threadId, emit);
-    if (queue.intent) throw uncertain(queue.intent);
+    if (queue.intent) throw uncertain();
     const index = queue.items.findIndex(item => item.id === queuedSubmissionId);
     if (index < 0) throw invalid(`Queued submission not found: ${queuedSubmissionId}`);
     const queuedSubmission = { ...queue.items[index], input: durableInput(params.input) };
@@ -65,7 +65,7 @@ export const queueHandlers = {
   async 'thread/queue/reorder'(params, emit) {
     const { threadId, queuedSubmissionIds } = params;
     const queue = await this.requireQueue(threadId, emit);
-    if (queue.intent) throw uncertain(queue.intent);
+    if (queue.intent) throw uncertain();
     const byId = new Map(queue.items.map(item => [item.id, item]));
     if (!Array.isArray(queuedSubmissionIds) || queuedSubmissionIds.length !== byId.size || new Set(queuedSubmissionIds).size !== byId.size || queuedSubmissionIds.some(id => !byId.has(id))) {
       throw invalid('Queue reorder must include every queued submission exactly once.');
@@ -150,7 +150,7 @@ export const queueMethods = {
 
   async dispatchQueue(threadId, queuedSubmissionId, emit) {
     const queue = await this.requireQueue(threadId, emit);
-    if (queue.intent) throw uncertain(queue.intent);
+    if (queue.intent) throw uncertain();
     if (!this.meta.owned?.[threadId]) throw invalid('Send a task to take over the thread before starting a queued submission.');
     const rpc = await this.rpc(threadId);
     if (this.queueClosing) throw invalid('Codex Remote is shutting down.');
@@ -172,7 +172,7 @@ export const queueMethods = {
       return turn;
     } catch (error) {
       // A failed prompt response, process exit or metadata write cannot prove non-execution.
-      throw invalid(`${uncertain(intent).message} Cause: ${error.message}`);
+      throw invalid(`${uncertain().message} Cause: ${error.message}`);
     }
   },
 };
