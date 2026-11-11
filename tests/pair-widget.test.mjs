@@ -7,7 +7,7 @@ const hooks = registerHooks({
     let source;
     if (specifier === '@earendil-works/pi-coding-agent') source = 'export const resizeImage = () => { throw new Error("Unexpected image resize"); };';
     if (specifier === '@earendil-works/pi-tui') source = 'export class Loader {} export class Text {}';
-    if (specifier === './src/daemon.mjs') source = 'export const control = () => { throw new Error("Input must not control the relay"); }; export const start = control;';
+    if (specifier === './src/daemon.mjs') source = 'export const control = () => { throw new Error("Input must not control the relay"); }; export const start = control; export const setEnabled = control; export const paths = () => ({ enabled: "/nonexistent" });';
     return source ? { url: `data:text/javascript,${encodeURIComponent(source)}`, shortCircuit: true } : nextResolve(specifier, context);
   },
 });

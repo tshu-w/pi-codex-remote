@@ -1,7 +1,8 @@
 import { resizeImage, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Loader, Text } from "@earendil-works/pi-tui";
+import { existsSync } from "node:fs";
 import QRCode from "qrcode";
-import { control, start } from "./src/daemon.mjs";
+import { control, paths, setEnabled, start } from "./src/daemon.mjs";
 import { createLiveSessionRegistry } from "./src/live-sessions.mjs";
 import { registerRevertCommand } from "./src/revert-command.mjs";
 
@@ -15,6 +16,11 @@ export default function codexRemote(pi: ExtensionAPI) {
     });
     if (ctx.mode === "rpc" && process.env.PI_CODEX_REMOTE_RPC === "1") {
       ctx.ui.setStatus("codex-remote-model-scope", JSON.stringify(ctx.scopedModels.map(({ model }) => ({ provider: model.provider, id: model.id }))));
+    } else if (existsSync(paths().enabled)) {
+      // An enabled daemon that is down starts again; when it runs, this is one status request.
+      void start().catch((error: Error) => {
+        if (ctx.mode === "tui") ctx.ui.notify(`Codex Remote did not start: ${error.message}`, "warning");
+      });
     }
   });
   pi.on("session_shutdown", (event) => {
@@ -38,10 +44,10 @@ export default function codexRemote(pi: ExtensionAPI) {
     description: "Connect ChatGPT to Pi: start, pair, status, stop",
     getArgumentCompletions: (prefix) => {
       const items = [
-        { value: "start", label: "start", description: "Start the background daemon" },
+        { value: "start", label: "start", description: "Start the background daemon, and again with each Pi session" },
         { value: "pair", label: "pair", description: "Pair a device" },
         { value: "status", label: "status", description: "Show daemon and connection status" },
-        { value: "stop", label: "stop", description: "Stop the background daemon" },
+        { value: "stop", label: "stop", description: "Stop the background daemon until the next start or pair" },
       ].filter(item => item.value.startsWith(prefix.trim()));
       return items.length > 0 ? items : null;
     },
@@ -65,6 +71,7 @@ export default function codexRemote(pi: ExtensionAPI) {
         });
       }
       try {
+        if (action !== "status") await setEnabled(action !== "stop");
         if (action === "pair") {
           await start();
           loader?.setMessage("Preparing pairing code…");

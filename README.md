@@ -17,6 +17,8 @@ Run in a Pi terminal:
 - `/codex-remote status`: show the daemon and connection state
 - `/codex-remote stop`: stop the daemon
 
+After `pair` or `start`, the daemon starts with the next Pi session whenever it is not running, and replaces itself when the plugin is updated. After `stop`, it stays stopped until the next `start` or `pair`.
+
 Pairing requires a Codex login on the machine running Pi. State and logs default to `~/.local/state/pi/codex-remote/`.
 
 ## Limits
