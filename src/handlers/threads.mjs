@@ -64,12 +64,11 @@ export const threadsHandlers = {
       }
       return true;
     });
-    // A thread's Agents list their running ones and the 50 last active; the app reads each it lists, and others open by ID.
+    // A thread's Agents list only their active ones; the app reads each it lists, and others open by ID.
     if (params.parentThreadId || params.ancestorThreadId) {
-      const idle = new Set(filtered.filter(record => this.threadStatus(record.id).type !== 'active').sort((a, b) => new Date(b.lastActive ?? b.modified) - new Date(a.lastActive ?? a.modified)).slice(50));
       // A page's anchor stays listed, so its cursor still continues the list.
       const anchor = typeof params.cursor === 'string' ? params.cursor.replace(/^(after|at):/, '') : null;
-      filtered = filtered.filter(record => !idle.has(record) || record.id === anchor);
+      filtered = filtered.filter(record => this.threadStatus(record.id).type === 'active' || record.id === anchor);
     }
     const key = ['updated_at', 'recency_at'].includes(params.sortKey) ? 'modified' : 'created';
     filtered.sort((a, b) => new Date(b[key]) - new Date(a[key]) || a.id.localeCompare(b.id));

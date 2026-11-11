@@ -166,25 +166,23 @@ test('an owned Agent thread is active from its input until its result, while its
   assert.deepEqual(status(), ['active', 'notLoaded', 'active', 'notLoaded']);
 });
 
-test('a thread lists its running Agents and the 50 last active, and opens any other by ID', async t => {
-  const { rpc, client, id, agents } = await setup(t, { children: 55 });
-  rpc.entries.push({ type: 'custom', id: 'e0', parentId: null, timestamp: new Date().toISOString(), customType: 'pi-agents-agent', data: { id: agents[0].id, name: 'agent-0', inputs: [{ id: 'i1', state: 'running' }] } });
-  // An old session rewritten today keeps its place: recency is its last entry's time.
-  agents[5].lastActive = new Date(4000);
-  agents[2].lastActive = new Date(100_000);
+test('a thread lists only its running Agents, and opens any other by ID', async t => {
+  const { rpc, client, id, agents } = await setup(t, { children: 5 });
+  const running = agentId => rpc.entries.push({ type: 'custom', id: `e-${agentId}`, parentId: null, timestamp: new Date().toISOString(), customType: 'pi-agents-agent', data: { id: agentId, name: agentId, inputs: [{ id: 'i1', state: 'running' }] } });
+  running(agents[0].id);
+  running(agents[3].id);
   await client.request('thread/turns/list', { threadId: id });
-  const listed = (await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 200, sortKey: 'created_at' })).data;
-  assert.deepEqual(listed.map(thread => thread.id), [...agents.slice(6).reverse(), agents[2], agents[0]].map(agent => agent.id));
-  assert.equal(listed.at(-1).status.type, 'active');
-  // A page's cursor continues the list after another Agent becomes the 50th last active.
-  const first = await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 2, sortKey: 'created_at', sortDirection: 'asc' });
-  assert.deepEqual(first.data.map(thread => thread.id), [agents[0].id, agents[2].id]);
-  agents[2].lastActive = new Date(0);
-  agents[1].lastActive = new Date(200_000);
+  const listed = (await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 200, sortKey: 'created_at', sortDirection: 'asc' })).data;
+  assert.deepEqual(listed.map(thread => [thread.id, thread.status.type]), [[agents[0].id, 'active'], [agents[3].id, 'active']]);
+  // A page's cursor continues the list after its anchor stops running.
+  const first = await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 1, sortKey: 'created_at', sortDirection: 'asc' });
+  assert.deepEqual(first.data.map(thread => thread.id), [agents[0].id]);
+  rpc.entries.push({ type: 'custom', id: 'e-done', parentId: null, timestamp: new Date().toISOString(), customType: 'pi-agents-input', data: { agentId: agents[0].id, id: 'i1', state: 'completed' } });
+  await client.request('thread/turns/list', { threadId: id });
   const next = await client.request('thread/list', { ancestorThreadId: id, sourceKinds: ['subAgentThreadSpawn'], limit: 1, sortKey: 'created_at', sortDirection: 'asc', cursor: first.nextCursor });
-  assert.deepEqual(next.data.map(thread => thread.id), [agents[6].id]);
+  assert.deepEqual(next.data.map(thread => thread.id), [agents[3].id]);
   // A card in the owner's history still opens an Agent the list leaves out.
-  const hidden = agents[3].id;
+  const hidden = agents[2].id;
   assert.equal((await client.request('thread/read', { threadId: hidden, includeTurns: true })).thread.id, hidden);
   assert.deepEqual((await client.request('thread/turns/list', { threadId: hidden })).data, []);
   assert.equal((await client.request('thread/resume', { threadId: hidden })).thread.id, hidden);
