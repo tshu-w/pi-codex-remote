@@ -113,7 +113,14 @@ export class Remote {
     if (result.server_id !== enrollment.server_id || result.environment_id !== enrollment.environment_id) throw new Error('Pairing returned a different device');
     const url = new URL('https://chatgpt.com/codex/pair');
     url.searchParams.set('pairing_code', result.pairing_code);
-    return { url: url.toString(), manualCode: result.manual_pairing_code, expiresAt: result.expires_at };
+    return { url: url.toString(), pairingCode: result.pairing_code, manualCode: result.manual_pairing_code, expiresAt: result.expires_at };
+  }
+
+  // Whether the phone has used a pairing code yet.
+  async pairingStatus(pairingCode) {
+    const enrollment = await this.enroll();
+    const { claimed } = await this.post('server/pair/status', enrollment.remote_control_token, { pairing_code: pairingCode });
+    return { claimed: claimed === true };
   }
 
   setStatus(status, error) {

@@ -1,14 +1,16 @@
 import { createServer, createConnection } from 'node:net';
 import { accessSync, constants, existsSync, realpathSync, unlinkSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { execFile, spawn } from 'node:child_process';
 import { open, readFile, readdir, mkdir, unlink, chmod, rename, stat, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { Remote, remotePaths } from './remote.mjs';
 import { Sessions } from './sessions.mjs';
 import { Protocol } from './protocol.mjs';
+
+const execFileAsync = promisify(execFile);
 
 const MAX_LOG = 10 * 1024 * 1024;
 
@@ -49,35 +51,45 @@ export async function acquireLock(dir, pid = process.pid) {
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// Sizes and modification times of the code a daemon runs: an update or checkout changes them.
-export async function fingerprint(dir = root) {
-  const files = ['package.json', 'index.ts', ...(await readdir(join(dir, 'src'), { recursive: true, withFileTypes: true }))
-    .filter(entry => entry.isFile()).map(entry => relative(dir, join(entry.parentPath, entry.name)))].sort();
-  const hash = createHash('sha256');
-  for (const file of files) {
-    const { size, mtimeMs } = await stat(join(dir, file));
-    hash.update(`${file}\0${size}\0${mtimeMs}\0`);
-  }
-  return hash.digest('hex').slice(0, 16);
+// The checked-out commit of a git install, else the package version: edits in progress do not change it.
+export async function codeVersion(dir = root) {
+  if (existsSync(join(dir, '.git'))) return (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: dir })).stdout.trim();
+  return JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')).version;
 }
 
-// Each check hands over once the code on disk has changed, the daemon is idle and the new code loads.
-// Code that does not load is not tried again until it changes once more.
-export function updateCheck({ initial, current = fingerprint, idle, loads, handover, log = () => {} }) {
+// A Pi session that runs other code than the daemon asks it to retire. The daemon hands over once it is idle and
+// the code on disk is still that code and loads; code that does not load is not tried again.
+export function createRetirement({ initial, current = codeVersion, idle, loads, handover, log = () => {}, intervalMs = 1000 }) {
   let rejected;
-  let done = false;
-  return async () => {
-    if (done) return;
-    const next = await current();
-    if (next === initial || next === rejected || !idle()) return;
-    if (!await loads()) {
-      rejected = next;
-      log('updated code does not load; keeping the running daemon');
-      return;
+  let target;
+  let timer;
+  let checking = false;
+  const check = async () => {
+    if (checking || !idle()) return;
+    checking = true;
+    try {
+      if (!await loads()) {
+        rejected = target;
+        target = undefined;
+        clearInterval(timer);
+        log('updated code does not load; keeping the running daemon');
+      } else if (idle()) {
+        clearInterval(timer);
+        handover();
+      }
+    } finally { checking = false; }
+  };
+  return async version => {
+    if (target !== undefined || version === initial || version === rejected) return false;
+    target = version;
+    if (await current() !== version) {
+      target = undefined;
+      return false;
     }
-    if (!idle()) return;
-    done = true;
-    handover();
+    log('code updated; handing over to a new daemon once idle');
+    timer = setInterval(() => { void check().catch(error => log(`update check failed: ${error.message}`)); }, intervalMs);
+    timer.unref();
+    return true;
   };
 }
 
@@ -87,12 +99,12 @@ const loads = () => new Promise(resolve => {
   child.on('exit', code => resolve(code === 0));
 });
 
-export function control(action, statePaths = paths()) {
+export function control(action, statePaths = paths(), params = {}) {
   return new Promise((resolve, reject) => {
     const socket = createConnection(statePaths.socket);
     const timer = setTimeout(() => { socket.destroy(); reject(new Error('Codex Remote control request timed out')); }, 35000);
     let buffer = '';
-    socket.on('connect', () => socket.write(`${JSON.stringify({ action })}\n`));
+    socket.on('connect', () => socket.write(`${JSON.stringify({ ...params, action })}\n`));
     socket.on('data', bytes => {
       buffer += bytes.toString();
       const end = buffer.indexOf('\n');
@@ -136,7 +148,7 @@ async function serve() {
   await mkdir(p.state, { recursive: true, mode: 0o700 });
   await chmod(p.state, 0o700);
   const releaseLock = await acquireLock(p.state);
-  const code = await fingerprint();
+  const code = await codeVersion();
   // With `pi-agents` on PATH, saved sessions join their hosts instead of running a private Pi.
   const hosted = (process.env.PATH ?? '').split(':').some(dir => { try { accessSync(join(dir, 'pi-agents'), constants.X_OK); return true; } catch { return false; } });
   console.error(`${new Date().toISOString()} sessions ${hosted ? 'pi-agents hosts' : 'pi'}`);
@@ -148,8 +160,8 @@ async function serve() {
     console.error(`${new Date().toISOString()} ${request.method} ${error ? `error:${error.code ?? -32000}${validation}` : 'ok'}${threadContext}`);
   } });
   let requests = 0;
-  // A pairing code stays valid until it expires; the daemon is not replaced before then.
-  let pairingUntil = 0;
+  // Pairing codes not yet used, until they expire; the daemon is not replaced while one is valid.
+  const pairings = new Map();
   const remote = new Remote({ stateDir: p.state, handle: async (message, emit) => {
     if (message.id !== undefined) console.error(`${new Date().toISOString()} ${message.method}`);
     requests++;
@@ -163,6 +175,7 @@ async function serve() {
   let stopping;
   let handingOver = false;
   let stopRequested = false;
+  let retire = async () => false;
   const stop = () => stopping ||= (async () => {
     await protocol.close();
     await sessions.close();
@@ -185,14 +198,19 @@ async function serve() {
         if (end < 0) return;
         socket.removeAllListeners('data');
         void (async () => {
-          const { action } = JSON.parse(buffer.slice(0, end));
+          const { action, ...params } = JSON.parse(buffer.slice(0, end));
           let result;
-          if (action === 'status') result = { pid: process.pid, status: remote.status, error: remote.error, log: p.log };
+          if (action === 'status') result = { pid: process.pid, status: remote.status, error: remote.error, log: p.log, version: code };
+          else if (action === 'retire') result = { retiring: await retire(params.version) };
+          else if (action === 'pairStatus') {
+            result = await remote.pairingStatus(params.pairingCode);
+            if (result.claimed) pairings.delete(params.pairingCode);
+          }
           else if (action === 'pair') {
             requests++;
             try { result = await remote.pair(); }
             finally { requests--; }
-            pairingUntil = Math.max(pairingUntil, Date.parse(result.expiresAt));
+            pairings.set(result.pairingCode, Date.parse(result.expiresAt));
           }
           else if (action === 'stop') {
             stopRequested = true;
@@ -207,18 +225,16 @@ async function serve() {
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(p.socket, resolve); });
     await chmod(p.socket, 0o600);
     running = remote.run();
-    const check = updateCheck({
+    retire = createRetirement({
       initial: code,
-      idle: () => !stopping && !requests && !protocol.active.size && Date.now() >= pairingUntil,
+      idle: () => !stopping && !requests && !protocol.active.size && [...pairings.values()].every(expiry => expiry <= Date.now()),
       loads,
       handover: () => {
-        console.error(`${new Date().toISOString()} code updated; handing over to a new daemon`);
         handingOver = true;
         void stop().catch(error => { console.error(error.message); process.exitCode = 1; });
       },
       log: message => console.error(`${new Date().toISOString()} ${message}`),
     });
-    setInterval(() => { void check().catch(error => console.error(`${new Date().toISOString()} update check failed: ${error.message}`)); }, 60000).unref();
     const onSignal = () => { void stop().catch(error => { console.error(error.message); process.exitCode = 1; }); };
     process.once('SIGTERM', onSignal);
     process.once('SIGINT', onSignal);

@@ -1,10 +1,13 @@
-import { resizeImage, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Loader, Text } from "@earendil-works/pi-tui";
+import { keyHint, resizeImage, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Loader, truncateToWidth } from "@earendil-works/pi-tui";
 import { existsSync } from "node:fs";
 import QRCode from "qrcode";
-import { control, paths, setEnabled, start } from "./src/daemon.mjs";
+import { codeVersion, control, paths, setEnabled, start } from "./src/daemon.mjs";
 import { createLiveSessionRegistry } from "./src/live-sessions.mjs";
 import { registerRevertCommand } from "./src/revert-command.mjs";
+
+// The code this Pi loaded; a daemon running other code is asked to retire.
+const version = codeVersion();
 
 export default function codexRemote(pi: ExtensionAPI) {
   registerRevertCommand(pi);
@@ -18,7 +21,11 @@ export default function codexRemote(pi: ExtensionAPI) {
       ctx.ui.setStatus("codex-remote-model-scope", JSON.stringify(ctx.scopedModels.map(({ model }) => ({ provider: model.provider, id: model.id }))));
     } else if (existsSync(paths().enabled)) {
       // An enabled daemon that is down starts again; when it runs, this is one status request.
-      void start().catch((error: Error) => {
+      void (async () => {
+        const status = await start();
+        const loaded = await version;
+        if (status.version && status.version !== loaded) await control("retire", undefined, { version: loaded });
+      })().catch((error: Error) => {
         if (ctx.mode === "tui") ctx.ui.notify(`Codex Remote did not start: ${error.message}`, "warning");
       });
     }
@@ -28,7 +35,6 @@ export default function codexRemote(pi: ExtensionAPI) {
   });
 
   pi.on("input", async (event, ctx) => {
-    if (ctx.mode === "tui" && event.source === "interactive") ctx.ui.setWidget("codex-remote-pair", undefined);
     // Codex Remote's input arrives over RPC, from its own Pi or a pi-agents host, so it is not told apart from other RPC clients.
     if (event.source !== "rpc" || !event.images?.length || pi.getSettings().images?.autoResize === false) return;
     for (const image of event.images) {
@@ -44,10 +50,10 @@ export default function codexRemote(pi: ExtensionAPI) {
     description: "Connect ChatGPT to Pi: start, pair, status, stop",
     getArgumentCompletions: (prefix) => {
       const items = [
-        { value: "start", label: "start", description: "Start the background daemon, and again with each Pi session" },
+        { value: "start", label: "start", description: "Start the background daemon" },
         { value: "pair", label: "pair", description: "Pair a device" },
         { value: "status", label: "status", description: "Show daemon and connection status" },
-        { value: "stop", label: "stop", description: "Stop the background daemon until the next start or pair" },
+        { value: "stop", label: "stop", description: "Stop the background daemon" },
       ].filter(item => item.value.startsWith(prefix.trim()));
       return items.length > 0 ? items : null;
     },
@@ -77,18 +83,36 @@ export default function codexRemote(pi: ExtensionAPI) {
           loader?.setMessage("Preparing pairing code…");
           const pairing = await control("pair");
           const qr = await QRCode.toString(pairing.url, { type: "terminal", small: true });
-          ctx.ui.setWidget("codex-remote-pair", () => new Text([
-            "Codex Remote · scan to pair",
-            ...qr.trimEnd().split("\n"),
-            `Manual code: ${pairing.manualCode || "unavailable"}`,
-            `Expires: ${new Date(pairing.expiresAt).toLocaleString(undefined, { timeZoneName: "short" })}`,
-            "Codex Remote tasks use Pi's local permissions, without Codex sandboxing.",
-          ].join("\n"), 1, 0));
+          ctx.ui.setWidget("codex-remote-progress", undefined);
+          // The code closes when the phone uses it or it expires, or on Esc or Enter.
+          const outcome = await ctx.ui.custom<"paired" | "expired" | undefined>((_tui, _theme, keybindings, done) => {
+            const poll = setInterval(() => {
+              void control("pairStatus", undefined, { pairingCode: pairing.pairingCode }).then(({ claimed }) => { if (claimed) done("paired"); }, () => {});
+            }, 2000);
+            const expiry = setTimeout(() => done("expired"), Math.max(0, Date.parse(pairing.expiresAt) - Date.now()));
+            const lines = [
+              "Codex Remote · scan to pair",
+              ...qr.trimEnd().split("\n"),
+              `Manual code: ${pairing.manualCode || "unavailable"}`,
+              `Expires: ${new Date(pairing.expiresAt).toLocaleString(undefined, { timeZoneName: "short" })}`,
+              "Codex Remote tasks use Pi's local permissions, without Codex sandboxing.",
+              `(${keyHint("tui.select.cancel", "to close")})`,
+            ];
+            return {
+              render: (width: number) => lines.map(line => truncateToWidth(` ${line}`, width)),
+              invalidate() {},
+              handleInput(data: string) {
+                if (keybindings.matches(data, "tui.select.cancel") || keybindings.matches(data, "tui.select.confirm")) done(undefined);
+              },
+              dispose() { clearInterval(poll); clearTimeout(expiry); },
+            };
+          });
+          if (outcome === "paired") ctx.ui.notify("Codex Remote paired", "info");
+          else if (outcome === "expired") ctx.ui.notify("Pairing code expired. Run /codex-remote pair for a new one.", "warning");
           return;
         }
         if (action === "stop") {
           await control("stop");
-          ctx.ui.setWidget("codex-remote-pair", undefined);
           ctx.ui.notify("Codex Remote stopping", "info");
           return;
         }

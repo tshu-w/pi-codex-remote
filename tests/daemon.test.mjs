@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { registerHooks } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { fingerprint, setEnabled, updateCheck } from '../src/daemon.mjs';
+import { codeVersion, createRetirement, setEnabled } from '../src/daemon.mjs';
 
 const temporary = async t => {
   const dir = await mkdtemp(join(tmpdir(), 'codex-remote-daemon-'));
@@ -44,75 +44,115 @@ test('stop clears what pair and start enable', async t => {
   assert.equal(existsSync(statePaths.enabled), false);
 });
 
-test('the fingerprint changes when code is updated', async t => {
+test('code outside a git checkout is known by its package version', async t => {
   const dir = await temporary(t);
-  await mkdir(join(dir, 'src', 'handlers'), { recursive: true });
-  for (const file of ['package.json', 'index.ts', 'src/a.mjs', 'src/handlers/b.mjs']) await writeFile(join(dir, file), 'x');
-  const before = await fingerprint(dir);
-  assert.equal(await fingerprint(dir), before);
-  await utimes(join(dir, 'src/handlers/b.mjs'), new Date(), new Date(Date.now() + 5000));
-  assert.notEqual(await fingerprint(dir), before);
+  await writeFile(join(dir, 'package.json'), JSON.stringify({ version: '1.2.3' }));
+  assert.equal(await codeVersion(dir), '1.2.3');
 });
 
-test('an update hands over once idle, and code that does not load is not retried', async () => {
-  let code = 'old';
+test('a retiring daemon hands over once idle, only to code on disk that loads, and not again to code that failed', async () => {
+  let disk = 'new';
   let idle = false;
   let loadable = false;
   const loaded = [];
   let handovers = 0;
-  const check = updateCheck({ initial: 'old', current: async () => code, idle: () => idle, loads: async () => { loaded.push(code); return loadable; }, handover: () => handovers++ });
-  await check();
-  code = 'broken';
-  await check();
+  const retire = createRetirement({ initial: 'old', current: async () => disk, idle: () => idle, loads: async () => { loaded.push(disk); return loadable; }, handover: () => handovers++, intervalMs: 5 });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(await retire('old'), false, 'the same code does not retire');
+  assert.equal(await retire('other'), false, 'a Pi that loaded code no longer on disk does not decide');
+  assert.deepEqual(await Promise.all([retire('new'), retire('new')]), [true, false], 'concurrent requests retire once');
+  await settle();
   assert.deepEqual([loaded, handovers], [[], 0], 'a busy daemon waits');
   idle = true;
-  await check();
-  await check();
-  assert.deepEqual([loaded, handovers], [['broken'], 0], 'code that does not load is tried once');
-  code = 'fixed';
+  await settle();
+  assert.deepEqual([loaded, handovers], [['new'], 0], 'code that does not load is tried once');
+  assert.equal(await retire('new'), false);
+  disk = 'fixed';
   loadable = true;
-  await check();
-  await check();
-  assert.deepEqual([loaded, handovers], [['broken', 'fixed'], 1]);
+  assert.equal(await retire('fixed'), true);
+  await settle();
+  assert.deepEqual([loaded, handovers], [['new', 'fixed'], 1]);
 });
 
-test('Pi sessions start an enabled daemon, and stop keeps it stopped', async t => {
-  const dir = await temporary(t);
-  const enabled = join(dir, 'enabled');
-  const calls = globalThis.codexRemoteDaemonCalls = [];
-  const source = `import { rmSync, writeFileSync } from 'node:fs';
-    const calls = globalThis.codexRemoteDaemonCalls;
-    export const paths = () => ({ enabled: ${JSON.stringify(enabled)} });
-    export const setEnabled = async on => on ? writeFileSync(${JSON.stringify(enabled)}, '') : rmSync(${JSON.stringify(enabled)}, { force: true });
-    export const start = async () => { calls.push('start'); return { status: 'connected', log: 'log' }; };
-    export const control = async action => { calls.push(action); return action === 'pair' ? { url: 'https://chatgpt.com/codex/pair', manualCode: 'CODE', expiresAt: new Date().toISOString() } : { status: 'connected', log: 'log' }; };`;
+async function loadExtension(t, daemon) {
   const hooks = registerHooks({
     resolve(specifier, context, nextResolve) {
-      if (specifier === './src/daemon.mjs') return { url: `data:text/javascript,${encodeURIComponent(source)}`, shortCircuit: true };
-      if (specifier === '@earendil-works/pi-coding-agent') return { url: 'data:text/javascript,export const resizeImage = () => {};', shortCircuit: true };
-      if (specifier === '@earendil-works/pi-tui') return { url: 'data:text/javascript,export class Loader { setMessage() {} stop() {} } export class Text {}', shortCircuit: true };
-      return nextResolve(specifier, context);
+      const source = specifier === './src/daemon.mjs' ? daemon
+        : specifier === '@earendil-works/pi-coding-agent' ? 'export const resizeImage = () => {}; export const keyHint = (key, text) => key + " " + text;'
+          : specifier === '@earendil-works/pi-tui' ? 'export class Loader { setMessage() {} stop() {} } export const truncateToWidth = text => text;' : undefined;
+      return source ? { url: `data:text/javascript,${encodeURIComponent(source)}`, shortCircuit: true } : nextResolve(specifier, context);
     },
   });
-  let codexRemote;
-  try { ({ default: codexRemote } = await import(`../index.ts?auto-start`)); }
+  try { return (await import(`../index.ts?${t.name}`)).default; }
   finally { hooks.deregister(); }
+}
+
+function register(codexRemote) {
   const handlers = new Map();
   let command;
   codexRemote({ on: (name, handler) => handlers.set(name, [...handlers.get(name) ?? [], handler]), registerCommand: (_name, options) => { command = options; } });
+  return { handlers, command: () => command };
+}
+
+test('Pi sessions start an enabled daemon, retire one running other code, and stop keeps it stopped', async t => {
+  const dir = await temporary(t);
+  const enabled = join(dir, 'enabled');
+  const calls = globalThis.codexRemoteDaemonCalls = [];
+  globalThis.codexRemoteDaemonVersion = 'loaded';
+  const codexRemote = await loadExtension(t, `import { rmSync, writeFileSync } from 'node:fs';
+    const calls = globalThis.codexRemoteDaemonCalls;
+    export const codeVersion = async () => 'loaded';
+    export const paths = () => ({ enabled: ${JSON.stringify(enabled)} });
+    export const setEnabled = async on => on ? writeFileSync(${JSON.stringify(enabled)}, '') : rmSync(${JSON.stringify(enabled)}, { force: true });
+    export const start = async () => { calls.push('start'); return { status: 'connected', log: 'log', version: globalThis.codexRemoteDaemonVersion }; };
+    export const control = async (action, _paths, params) => { calls.push(params ? [action, params] : action); return { status: 'connected', log: 'log' }; };`);
+  const { handlers, command } = register(codexRemote);
   const ui = { notify() {}, setWidget() {}, setStatus() {} };
   const sessionManager = { getSessionFile: () => undefined, getSessionId: () => 'session' };
   const sessionStart = async (mode = 'rpc') => {
     calls.length = 0;
     for (const handler of handlers.get('session_start')) await handler({}, { mode, ui, sessionManager });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setTimeout(resolve, 10));
     return [...calls];
   };
   assert.deepEqual(await sessionStart(), [], 'nothing starts before pairing or start');
-  await command.handler('start', { mode: 'tui', ui });
+  await command().handler('start', { mode: 'tui', ui });
   assert.deepEqual(await sessionStart(), ['start']);
-  await command.handler('stop', { mode: 'tui', ui });
+  globalThis.codexRemoteDaemonVersion = 'earlier';
+  assert.deepEqual(await sessionStart(), ['start', ['retire', { version: 'loaded' }]]);
+  await command().handler('stop', { mode: 'tui', ui });
   assert.deepEqual(await sessionStart(), [], 'stop sticks');
-  await command.handler('pair', { mode: 'tui', ui });
-  assert.deepEqual(await sessionStart('tui'), ['start']);
+});
+
+test('the pair screen closes when the code is used, when it expires, and on Esc or Enter', async t => {
+  globalThis.codexRemotePairing = { claimed: false, expiresAt: new Date(Date.now() + 60000).toISOString() };
+  const codexRemote = await loadExtension(t, `
+    export const codeVersion = async () => 'loaded';
+    export const paths = () => ({ enabled: '/nonexistent' });
+    export const setEnabled = async () => {};
+    export const start = async () => ({ status: 'connected', log: 'log' });
+    export const control = async action => action === 'pair'
+      ? { url: 'https://chatgpt.com/codex/pair?pairing_code=P', pairingCode: 'P', manualCode: 'M', expiresAt: globalThis.codexRemotePairing.expiresAt }
+      : { claimed: globalThis.codexRemotePairing.claimed };`);
+  const { command } = register(codexRemote);
+  const pair = async act => {
+    const notices = [];
+    let screen;
+    const ui = {
+      setWidget() {}, notify: (text, type) => notices.push([type, text]),
+      custom: factory => new Promise(resolve => {
+        screen = factory({}, {}, { matches: (data, id) => data === id }, resolve);
+        act(screen);
+      }).finally(() => screen.dispose()),
+    };
+    await command().handler('pair', { mode: 'tui', ui });
+    return { lines: screen.render(200), notices };
+  };
+  const { lines } = await pair(screen => screen.handleInput('tui.select.cancel'));
+  assert.ok(lines.includes(' Manual code: M'));
+  assert.equal(lines.at(-1), ' (tui.select.cancel to close)');
+  assert.deepEqual((await pair(screen => screen.handleInput('tui.select.confirm'))).notices, []);
+  assert.deepEqual((await pair(() => { globalThis.codexRemotePairing.claimed = true; })).notices, [['info', 'Codex Remote paired']]);
+  globalThis.codexRemotePairing = { claimed: false, expiresAt: new Date(Date.now() + 50).toISOString() };
+  assert.deepEqual((await pair(() => {})).notices, [['warning', 'Pairing code expired. Run /codex-remote pair for a new one.']]);
 });
