@@ -12,6 +12,11 @@ const version = codeVersion().then(value => ({ value }), error => ({ error }));
 export default function codexRemote(pi: ExtensionAPI) {
   registerRevertCommand(pi);
   const liveSessions = createLiveSessionRegistry();
+  pi.on("model_select", (_event, ctx) => {
+    const p = paths();
+    if (!existsSync(p.enabled) || !existsSync(p.socket)) return;
+    void control("settingsChanged", p, { sessionId: ctx.sessionManager.getSessionId() }).catch(() => {});
+  });
   pi.on("session_start", (_event, ctx) => {
     liveSessions.register({
       sessionFile: ctx.sessionManager.getSessionFile(),

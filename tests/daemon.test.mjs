@@ -175,6 +175,35 @@ test('Pi sessions start an enabled daemon, retire one running other code, and st
   assert.deepEqual(await sessionStart(), [], 'stop sticks');
 });
 
+test('model changes notify only an enabled running daemon and notification failure does not fail the switch', async t => {
+  const dir = await temporary(t);
+  const enabled = join(dir, 'enabled');
+  const socket = join(dir, 'control.sock');
+  const calls = globalThis.codexRemoteModelCalls = [];
+  t.after(() => { delete globalThis.codexRemoteModelCalls; });
+  const codexRemote = await loadExtension(t, `
+    export const codeVersion = async () => 'loaded';
+    export const paths = () => (${JSON.stringify({ enabled, socket })});
+    export const setEnabled = async () => {};
+    export const start = async () => { throw new Error('must not start a daemon'); };
+    export const control = async (...args) => { globalThis.codexRemoteModelCalls.push(args); throw new Error('daemon stopped'); };`);
+  const { handlers } = register(codexRemote);
+  const changed = async () => {
+    for (const handler of handlers.get('model_select')) await handler({}, { sessionManager: { getSessionId: () => 'session' } });
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  await writeFile(socket, '');
+  await changed();
+  assert.deepEqual(calls, [], 'a disabled daemon is not notified');
+  await rm(socket);
+  await writeFile(enabled, '');
+  await changed();
+  assert.deepEqual(calls, [], 'a stopped daemon is not started');
+  await writeFile(socket, '');
+  await changed();
+  assert.deepEqual(calls, [['settingsChanged', { enabled, socket }, { sessionId: 'session' }]]);
+});
+
 test('a failed loaded-code version check is handled before a session starts and reports the original error', async t => {
   const dir = await temporary(t);
   const enabled = join(dir, 'enabled');

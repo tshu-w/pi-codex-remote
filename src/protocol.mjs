@@ -234,10 +234,13 @@ export class Protocol {
   }
 
   register(rpc) {
-    if (!this.loaded.has(rpc.id)) rpc.onEvent(event => {
-      if (['agent_settled', 'compaction_end'].includes(event.type)) this.lastUsed.set(rpc.id, Date.now());
-      this.event(rpc, event);
-    });
+    if (!this.loaded.has(rpc.id)) {
+      rpc.remoteSettings = { model: modelKey(rpc.state.model), thinkingLevel: rpc.state.thinkingLevel };
+      rpc.onEvent(event => {
+        if (['agent_settled', 'compaction_end'].includes(event.type)) this.lastUsed.set(rpc.id, Date.now());
+        this.event(rpc, event);
+      });
+    }
     this.loaded.set(rpc.id, rpc);
     this.lastUsed.set(rpc.id, Date.now());
     this.inputEligibility.delete(rpc.id);
@@ -367,6 +370,27 @@ export class Protocol {
     };
   }
 
+  async refreshThreadSettings(threadId) {
+    const rpc = this.loaded.get(threadId);
+    if (!rpc) return;
+    await rpc.refresh();
+    if (this.loaded.get(threadId) !== rpc) return;
+    if (rpc.remoteSettings.model !== modelKey(rpc.state.model) || rpc.remoteSettings.thinkingLevel !== rpc.state.thinkingLevel) this.notifyThreadSettings(rpc);
+  }
+
+  notifyThreadSettings(rpc) {
+    const model = modelKey(rpc.state.model);
+    const effort = rpc.state.thinkingLevel === 'off' ? 'none' : rpc.state.thinkingLevel ?? null;
+    rpc.remoteSettings = { model, thinkingLevel: rpc.state.thinkingLevel };
+    this.notify(rpc.id, 'thread/settings/updated', { threadId: rpc.id, threadSettings: {
+      disabledPluginIds: [], cwd: rpc.cwd, approvalPolicy: 'never', approvalsReviewer: 'user',
+      sandboxPolicy: { type: 'dangerFullAccess' }, activePermissionProfile: null,
+      model, modelProvider: 'custom', serviceTier: null, effort, summary: null,
+      collaborationMode: { mode: 'default', settings: { model, reasoning_effort: effort, developer_instructions: null } },
+      multiAgentMode: 'explicitRequestOnly', personality: null,
+    } });
+  }
+
   async acquireThreadMutation(threadId) {
     const previous = this.mutationQueues.get(threadId);
     if (!previous && this.mutating.has(threadId)) throw invalid('Thread configuration or history is changing. Retry after the current request finishes.');
@@ -411,18 +435,7 @@ export class Protocol {
         checkSchema(notice);
         emit(notice);
       }
-      if (message.method === 'thread/settings/update') {
-        const rpc = this.loaded.get(threadId);
-        const model = modelKey(rpc.state.model);
-        const effort = rpc.state.thinkingLevel === 'off' ? 'none' : rpc.state.thinkingLevel ?? null;
-        this.notify(threadId, 'thread/settings/updated', { threadId, threadSettings: {
-          disabledPluginIds: [], cwd: rpc.cwd, approvalPolicy: 'never', approvalsReviewer: 'user',
-          sandboxPolicy: { type: 'dangerFullAccess' }, activePermissionProfile: null,
-          model, modelProvider: 'custom', serviceTier: null, effort, summary: null,
-          collaborationMode: { mode: 'default', settings: { model, reasoning_effort: effort, developer_instructions: null } },
-          multiAgentMode: 'explicitRequestOnly', personality: null,
-        } });
-      }
+      if (message.method === 'thread/settings/update') this.notifyThreadSettings(this.loaded.get(threadId));
       if (message.method === 'thread/revert') this.notify(threadId, 'thread/reverted', { threadId });
       if (['thread/archive', 'thread/unarchive'].includes(message.method)) {
         this.subscribe(threadId, emit);

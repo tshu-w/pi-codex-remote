@@ -73,7 +73,9 @@ export default function (pi) {
   pi.registerProvider('fixture', {
     api: 'fixture-api', apiKey: 'fixture-only', baseUrl: 'https://invalid.invalid',
     models: [{ id: 'scripted', name: 'Scripted fixture', reasoning: false, input: ['text', 'image'],
-      contextWindow: 128000, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
+      contextWindow: 128000, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { id: 'reasoning', name: 'Reasoning fixture', reasoning: true, input: ['text', 'image'],
+        contextWindow: 128000, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
     streamSimple(model, context, options = {}) {
       const stream = createAssistantMessageEventStream();
       const message = { role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,

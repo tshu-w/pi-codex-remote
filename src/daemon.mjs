@@ -212,6 +212,10 @@ async function serve({ auto = false } = {}) {
           let result;
           if (action === 'status') result = { pid: process.pid, status: remote.status, error: remote.error, log: p.log, version: code };
           else if (action === 'retire') result = { retiring: await retire(params.version) };
+          else if (action === 'settingsChanged') {
+            await protocol.refreshThreadSettings(params.sessionId);
+            result = {};
+          }
           else if (action === 'pairStatus') {
             result = await remote.pairingStatus(params.pairingCode);
             if (result.claimed) pairings.delete(params.pairingCode);

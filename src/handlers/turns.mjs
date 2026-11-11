@@ -368,6 +368,10 @@ export const turnsMethods = {
 
   event(rpc, event) {
     const active = this.active.get(rpc.id);
+    if (event.type === 'thinking_level_changed') {
+      void this.refreshThreadSettings(rpc.id).catch(error => process.emitWarning(error));
+      return;
+    }
     if (event.type === 'extension_ui_request' && event.method === 'notify' && event.notifyType === 'error' && event.message?.startsWith('Codex Remote rejected image:')) {
       if (active) active.imageRejection = event.message;
       return;
