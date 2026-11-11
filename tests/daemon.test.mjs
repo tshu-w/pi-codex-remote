@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { createServer } from 'node:net';
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { registerHooks } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { codeVersion, createRetirement, setEnabled } from '../src/daemon.mjs';
+import { codeVersion, createRetirement, paths, setEnabled } from '../src/daemon.mjs';
 
 const temporary = async t => {
   const dir = await mkdtemp(join(tmpdir(), 'codex-remote-daemon-'));
@@ -56,10 +58,14 @@ test('a retiring daemon hands over once idle, only to code on disk that loads, a
   let loadable = false;
   const loaded = [];
   let handovers = 0;
-  const retire = createRetirement({ initial: 'old', current: async () => disk, idle: () => idle, loads: async () => { loaded.push(disk); return loadable; }, handover: () => handovers++, intervalMs: 5 });
+  let versionError;
+  const retire = createRetirement({ initial: 'old', current: async () => { if (versionError) throw versionError; return disk; }, idle: () => idle, loads: async () => { loaded.push(disk); return loadable; }, handover: () => handovers++, intervalMs: 5 });
   const settle = () => new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(await retire('old'), false, 'the same code does not retire');
   assert.equal(await retire('other'), false, 'a Pi that loaded code no longer on disk does not decide');
+  versionError = new Error('git failed');
+  await assert.rejects(retire('new'), versionError);
+  versionError = undefined;
   assert.deepEqual(await Promise.all([retire('new'), retire('new')]), [true, false], 'concurrent requests retire once');
   await settle();
   assert.deepEqual([loaded, handovers], [[], 0], 'a busy daemon waits');
@@ -72,6 +78,51 @@ test('a retiring daemon hands over once idle, only to code on disk that loads, a
   assert.equal(await retire('fixed'), true);
   await settle();
   assert.deepEqual([loaded, handovers], [['new', 'fixed'], 1]);
+});
+
+test('stop cancels an automatic start awaiting its log, without blocking an explicit start', async t => {
+  const dir = await temporary(t);
+  const previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = dir;
+  t.after(() => { if (previous === undefined) delete process.env.XDG_STATE_HOME; else process.env.XDG_STATE_HOME = previous; });
+  const p = paths();
+  await setEnabled(true);
+  let ready;
+  let resume;
+  const opened = new Promise(resolve => { ready = resolve; });
+  const paused = new Promise(resolve => { resume = resolve; });
+  let spawned = 0;
+  const server = createServer(socket => socket.once('data', () => socket.end(`${JSON.stringify({ result: { status: 'connected' } })}\n`)));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  globalThis.codexRemoteOpen = async log => { ready(); await paused; return log; };
+  globalThis.codexRemoteSpawn = () => {
+    spawned++;
+    server.listen(p.socket);
+    return Object.assign(new EventEmitter(), { unref() {} });
+  };
+  t.after(() => { delete globalThis.codexRemoteOpen; delete globalThis.codexRemoteSpawn; });
+  const url = new URL(`../src/daemon.mjs?${encodeURIComponent(t.name)}`, import.meta.url).href;
+  const hooks = registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (context.parentURL !== url) return nextResolve(specifier, context);
+      const source = specifier === 'node:fs/promises'
+        ? `export * from 'node:fs/promises'; import { open as realOpen } from 'node:fs/promises'; export const open = async (...args) => globalThis.codexRemoteOpen(await realOpen(...args));`
+        : specifier === 'node:child_process'
+          ? `export { execFile } from 'node:child_process'; export const spawn = (...args) => globalThis.codexRemoteSpawn(...args);` : undefined;
+      return source ? { url: `data:text/javascript,${encodeURIComponent(source)}`, shortCircuit: true } : nextResolve(specifier, context);
+    },
+  });
+  let start;
+  try { ({ start } = await import(url)); }
+  finally { hooks.deregister(); }
+  const automatic = start({ auto: true });
+  await opened;
+  await setEnabled(false);
+  resume();
+  assert.equal(await automatic, undefined);
+  assert.equal(spawned, 0, 'an automatic start must not spawn after stop');
+  assert.equal((await start()).status, 'connected');
+  assert.equal(spawned, 1, 'an explicit start is not conditional on the auto-start flag');
 });
 
 async function loadExtension(t, daemon) {
@@ -122,6 +173,25 @@ test('Pi sessions start an enabled daemon, retire one running other code, and st
   assert.deepEqual(await sessionStart(), ['start', ['retire', { version: 'loaded' }]]);
   await command().handler('stop', { mode: 'tui', ui });
   assert.deepEqual(await sessionStart(), [], 'stop sticks');
+});
+
+test('a failed loaded-code version check is handled before a session starts and reports the original error', async t => {
+  const dir = await temporary(t);
+  const enabled = join(dir, 'enabled');
+  await writeFile(enabled, '');
+  const codexRemote = await loadExtension(t, `
+    export const codeVersion = async () => { throw new Error('git failed'); };
+    export const paths = () => ({ enabled: ${JSON.stringify(enabled)} });
+    export const setEnabled = async () => {};
+    export const start = async () => ({ version: 'daemon' });
+    export const control = async () => {};`);
+  await new Promise(resolve => setImmediate(resolve));
+  const { handlers } = register(codexRemote);
+  const notices = [];
+  const ctx = { mode: 'tui', ui: { notify: (...args) => notices.push(args) }, sessionManager: { getSessionFile: () => undefined, getSessionId: () => 'session' } };
+  for (const handler of handlers.get('session_start')) await handler({}, ctx);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(notices, [['Codex Remote did not start: git failed', 'warning']]);
 });
 
 test('the pair screen closes when the code is used, when it expires, and on Esc or Enter', async t => {

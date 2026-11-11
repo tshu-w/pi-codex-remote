@@ -7,7 +7,7 @@ import { createLiveSessionRegistry } from "./src/live-sessions.mjs";
 import { registerRevertCommand } from "./src/revert-command.mjs";
 
 // The code this Pi loaded; a daemon running other code is asked to retire.
-const version = codeVersion();
+const version = codeVersion().then(value => ({ value }), error => ({ error }));
 
 export default function codexRemote(pi: ExtensionAPI) {
   registerRevertCommand(pi);
@@ -22,9 +22,10 @@ export default function codexRemote(pi: ExtensionAPI) {
     } else if (existsSync(paths().enabled)) {
       // An enabled daemon that is down starts again; when it runs, this is one status request.
       void (async () => {
-        const status = await start();
         const loaded = await version;
-        if (status.version && status.version !== loaded) await control("retire", undefined, { version: loaded });
+        if ("error" in loaded) throw loaded.error;
+        const status = await start({ auto: true });
+        if (status?.version && status.version !== loaded.value) await control("retire", undefined, { version: loaded.value });
       })().catch((error: Error) => {
         if (ctx.mode === "tui") ctx.ui.notify(`Codex Remote did not start: ${error.message}`, "warning");
       });

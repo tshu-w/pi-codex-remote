@@ -82,9 +82,14 @@ export function createRetirement({ initial, current = codeVersion, idle, loads, 
   return async version => {
     if (target !== undefined || version === initial || version === rejected) return false;
     target = version;
-    if (await current() !== version) {
+    try {
+      if (await current() !== version) {
+        target = undefined;
+        return false;
+      }
+    } catch (error) {
       target = undefined;
-      return false;
+      throw error;
     }
     log('code updated; handing over to a new daemon once idle');
     timer = setInterval(() => { void check().catch(error => log(`update check failed: ${error.message}`)); }, intervalMs);
@@ -120,14 +125,18 @@ export function control(action, statePaths = paths(), params = {}) {
   });
 }
 
-export async function start() {
+export async function start({ auto = false } = {}) {
   const p = paths();
   try { return await control('status', p); }
   catch (error) { if (!['ENOENT', 'ECONNREFUSED'].includes(error.code)) throw error; }
   await mkdir(p.state, { recursive: true, mode: 0o700 });
   if ((await stat(p.log).catch(() => undefined))?.size > MAX_LOG) await rename(p.log, `${p.log}.1`).catch(error => { if (error.code !== 'ENOENT') throw error; });
   const log = await open(p.log, 'a', 0o600);
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--daemon'], {
+  if (auto && !existsSync(p.enabled)) {
+    await log.close();
+    return;
+  }
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--daemon', ...(auto ? ['--auto-start'] : [])], {
     cwd: process.env.HOME, env: process.env, detached: true, stdio: ['ignore', log.fd, log.fd],
   });
   let spawnError;
@@ -137,13 +146,14 @@ export async function start() {
   for (let i = 0; i < 350; i++) {
     if (spawnError) throw spawnError;
     await new Promise(resolve => setTimeout(resolve, 100));
+    if (auto && !existsSync(p.enabled)) return;
     try { return await control('status', p); }
     catch (error) { if (!['ENOENT', 'ECONNREFUSED'].includes(error.code)) throw error; }
   }
   throw new Error(`Codex Remote daemon did not start. See ${p.log}`);
 }
 
-async function serve() {
+async function serve({ auto = false } = {}) {
   const p = paths();
   await mkdir(p.state, { recursive: true, mode: 0o700 });
   await chmod(p.state, 0o700);
@@ -224,6 +234,10 @@ async function serve() {
     });
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(p.socket, resolve); });
     await chmod(p.socket, 0o600);
+    if (auto && !existsSync(p.enabled)) {
+      await stop();
+      return;
+    }
     running = remote.run();
     retire = createRetirement({
       initial: code,
@@ -248,10 +262,10 @@ async function serve() {
     releaseLock();
   }
   // A stop during the handover, by request or by `/codex-remote stop` clearing the flag, ends it.
-  if (handingOver && !stopRequested && existsSync(p.enabled)) await start().catch(error => { console.error(`${new Date().toISOString()} ${error.message}`); process.exitCode = 1; });
+  if (handingOver && !stopRequested && existsSync(p.enabled)) await start({ auto: true }).catch(error => { console.error(`${new Date().toISOString()} ${error.message}`); process.exitCode = 1; });
 }
 
 // `--check` only loads the modules, to tell whether updated code can start.
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url) && !process.argv.includes('--check')) {
-  serve().catch(error => { console.error(`${new Date().toISOString()} ${error.message}`); process.exitCode = 1; });
+  serve({ auto: process.argv.includes('--auto-start') }).catch(error => { console.error(`${new Date().toISOString()} ${error.message}`); process.exitCode = 1; });
 }
