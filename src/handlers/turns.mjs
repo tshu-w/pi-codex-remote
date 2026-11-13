@@ -471,16 +471,16 @@ export const turnsMethods = {
       let item = active.blocks.get(update.contentIndex);
       if (!item) {
         const id = `${active.turn.id}:assistant:${Math.max(0, active.messageIndex)}:${update.contentIndex}`;
-        item = this.startItem(active, thinking ? { type: 'reasoning', id, content: [''], summary: [] } : agentItem(id, '', textPhase(update.partial?.content?.[update.contentIndex])));
+        item = this.startItem(active, thinking ? { type: 'reasoning', id, content: [], summary: [''] } : agentItem(id, '', textPhase(update.partial?.content?.[update.contentIndex])));
         active.blocks.set(update.contentIndex, item);
       }
       if (!thinking) item.phase = textPhase(update.partial?.content?.[update.contentIndex]);
       if (update.type.endsWith('_delta')) {
-        if (thinking) item.content[0] += update.delta;
+        if (thinking) item.summary[0] += update.delta;
         else item.text += update.delta;
-        this.notify(rpc.id, thinking ? 'item/reasoning/textDelta' : 'item/agentMessage/delta', { threadId: rpc.id, turnId: active.turn.id, itemId: item.id, delta: update.delta, ...(thinking ? { contentIndex: 0 } : {}) });
+        this.notify(rpc.id, thinking ? 'item/reasoning/summaryTextDelta' : 'item/agentMessage/delta', { threadId: rpc.id, turnId: active.turn.id, itemId: item.id, delta: update.delta, ...(thinking ? { summaryIndex: 0 } : {}) });
       } else if (update.type.endsWith('_end')) {
-        if (thinking) item.content[0] = update.content;
+        if (thinking) item.summary[0] = update.content;
         else item.text = update.content;
       }
     } else if (event.type === 'message_end' && event.message.role === 'assistant') {
@@ -491,14 +491,14 @@ export const turnsMethods = {
         let item = active.blocks.get(index);
         if (!item) {
           const id = `${active.turn.id}:assistant:${Math.max(0, active.messageIndex)}:${index}`;
-          item = this.startItem(active, content.type === 'text' ? agentItem(id, '', textPhase(content)) : { type: 'reasoning', id, content: [''], summary: [] });
+          item = this.startItem(active, content.type === 'text' ? agentItem(id, '', textPhase(content)) : { type: 'reasoning', id, content: [], summary: [''] });
           active.blocks.set(index, item);
         }
         if (content.type === 'text') {
           item.text = content.text;
           item.phase = textPhase(content) ?? (message.stopReason === 'toolUse' || index < lastText ? 'commentary' : 'final_answer');
         }
-        else item.content[0] = content.thinking;
+        else item.summary[0] = content.thinking;
         this.completeItem(active, item);
       }
       active.messages.push(new Map(active.blocks));

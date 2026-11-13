@@ -353,7 +353,7 @@ export function projectHistory(entries, options = {}) {
           if (!item.phase) unphased.push({ item, toolUse: message.stopReason === 'toolUse' });
           turn.items.push(item);
         }
-        else if (block.type === 'thinking') turn.items.push({ type: 'reasoning', id, content: [block.thinking], summary: [] });
+        else if (block.type === 'thinking') turn.items.push({ type: 'reasoning', id, content: [], summary: [block.thinking] });
         else if (block.type === 'toolCall') {
           const item = toolItem(block.id, block.name, block.arguments, { cwd, namespace: block.namespace, senderThreadId });
           tools.set(block.id, item);

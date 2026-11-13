@@ -110,6 +110,42 @@ test('a turn started in the terminal is shown live and matches its history', asy
   assert.deepEqual(history.items.map(item => item.id), live.map(item => item.id));
 });
 
+test('GPT and Claude public thinking appears as reasoning summaries live, on completion and in history', async t => {
+  for (const [provider, api] of [['openai', 'openai-responses'], ['openai-codex', 'openai-codex-responses'], ['cli', 'anthropic-messages']]) {
+    const { rpc, client, id } = await setup(t);
+    rpc.state.model = { ...model, provider };
+    rpc.emit({ type: 'agent_start' });
+    rpc.message('u1', { role: 'user', content: 'Explain the result', timestamp: Date.now() });
+    await client.notification('turn/started');
+    rpc.emit({ type: 'message_start', message: { role: 'assistant', content: [], provider, api } });
+    await tick();
+    const update = event => rpc.emit({ type: 'message_update', assistantMessageEvent: { contentIndex: 0, ...event } });
+    update({ type: 'thinking_start' });
+    const started = (await client.notification('item/started', params => params.item.type === 'reasoning')).params.item;
+    assert.deepEqual({ summary: started.summary, content: started.content }, { summary: [''], content: [] }, provider);
+    update({ type: 'thinking_delta', delta: 'Public summary' });
+    const delta = (await client.notification('item/reasoning/summaryTextDelta')).params;
+    assert.equal(delta.itemId, started.id);
+    assert.equal(delta.summaryIndex, 0);
+    assert.equal(delta.delta, 'Public summary');
+    assert.equal(client.records.some(record => record.method === 'item/reasoning/textDelta'), false);
+    update({ type: 'thinking_end', content: 'Public summary at block end' });
+    const ended = (await client.request('thread/turns/list', { threadId: id, itemsView: 'full' })).data.flatMap(turn => turn.items).find(item => item.type === 'reasoning');
+    assert.deepEqual(ended.summary, ['Public summary at block end']);
+    const thinking = text => ({ type: 'thinking', thinking: text, thinkingSignature: 'opaque-provider-signature' });
+    rpc.message('a1', { role: 'assistant', provider, api, content: [thinking('Final public summary'), thinking('Summary without deltas')], stopReason: 'stop', timestamp: Date.now() });
+    rpc.emit({ type: 'agent_settled' });
+    await client.notification('turn/completed');
+    const live = client.records.filter(record => record.method === 'item/completed' && record.params.item.type === 'reasoning').map(record => record.params.item);
+    assert.deepEqual(live.map(({ summary, content }) => ({ summary, content })), [
+      { summary: ['Final public summary'], content: [] },
+      { summary: ['Summary without deltas'], content: [] },
+    ], provider);
+    const history = (await client.request('thread/turns/list', { threadId: id, itemsView: 'full' })).data.flatMap(turn => turn.items).filter(item => item.type === 'reasoning');
+    assert.deepEqual(history, live, provider);
+  }
+});
+
 test('an Agent result that starts a host turn after an answer shows the Agent completion live and in history', async t => {
   // Whether or not Remote read the Agent's record before its result arrives.
   for (const read of [true, false]) {
