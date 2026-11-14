@@ -407,6 +407,13 @@ export const turnsMethods = {
       return;
     }
     if (!active) return;
+    if (event.type === 'entry_appended' && event.entry.type === 'compaction') {
+      const { entry } = event;
+      if (active.completed.has(entry.id)) return;
+      this.meta.entries[entry.id] = { itemId: entry.id, turnId: active.turn.id };
+      this.completeItem(active, this.startItem(active, { type: 'contextCompaction', id: entry.id }));
+      return;
+    }
     if (event.type === 'compaction_end') {
       const item = active.compactionItem;
       active.compactionItem = undefined;

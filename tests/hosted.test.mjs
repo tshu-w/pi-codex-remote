@@ -90,7 +90,7 @@ async function setup(t, { releaseDelayMs = 60_000, running, children = 0 } = {})
   return { protocol, rpc, trash, client, id, agents };
 }
 
-test('a turn started in the terminal is shown live and matches its history', async t => {
+test('a terminal turn shows hook compaction live once and matches its history', async t => {
   const { rpc, client, id } = await setup(t);
   rpc.emit({ type: 'agent_start' });
   // The prompt is persisted before Remote's snapshot of the entries arrives.
@@ -99,12 +99,21 @@ test('a turn started in the terminal is shown live and matches its history', asy
   rpc.emit({ type: 'message_start', message: { role: 'assistant', content: [] } });
   await tick();
   rpc.message('a1', { role: 'assistant', content: [{ type: 'text', text: 'done' }], stopReason: 'stop', timestamp: Date.now() });
+  const entry = { type: 'compaction', id: 'c1', parentId: 'a1', timestamp: new Date().toISOString(), summary: 'Earlier context', firstKeptEntryId: 'u1', tokensBefore: 100, fromHook: true };
+  rpc.entries.push(entry);
+  rpc.emit({ type: 'entry_appended', entry });
+  rpc.emit({ type: 'entry_appended', entry });
+  const compactions = client.records.filter(record => record.params?.item?.type === 'contextCompaction');
+  assert.deepEqual(compactions.map(record => [record.method, record.params.threadId, record.params.turnId, record.params.item]), [
+    ['item/started', id, turn.id, { type: 'contextCompaction', id: entry.id }],
+    ['item/completed', id, turn.id, { type: 'contextCompaction', id: entry.id }],
+  ]);
   rpc.emit({ type: 'agent_settled' });
   const completed = (await client.notification('turn/completed')).params.turn;
   assert.equal(completed.id, turn.id);
   assert.equal(completed.status, 'completed');
   const live = client.records.filter(record => record.method === 'item/completed').map(record => record.params.item);
-  assert.deepEqual(live.map(item => item.type), ['userMessage', 'agentMessage']);
+  assert.deepEqual(live.map(item => item.type), ['userMessage', 'agentMessage', 'contextCompaction']);
   const [history] = (await client.request('thread/turns/list', { threadId: id, itemsView: 'full' })).data;
   assert.equal(history.id, turn.id);
   assert.deepEqual(history.items.map(item => item.id), live.map(item => item.id));
