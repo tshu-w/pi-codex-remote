@@ -17,7 +17,7 @@ test('desktop context is ignored on start and steer; default collaboration maps 
   const source = await readFile(extension, 'utf8');
   await writeFile(extension, source.replace("models: [{ id: 'scripted'", "models: [{ id: 'reasoning', name: 'Reasoning fixture', reasoning: true, input: ['text'], contextWindow: 128000, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, { id: 'scripted'"));
   const { protocol, client } = f.start({ releaseDelayMs: 60000 });
-  const { thread } = await client.request('thread/start', { cwd: f.cwd, model });
+  const { thread } = await client.request('thread/start', { cwd: f.cwd, model, personality: 'friendly' });
   const params = { threadId: thread.id, turnTrigger: 'composer', additionalContext,
     input: [{ type: 'text', text: 'hold', text_elements: [] }], cwd: null, permissions: null,
     runtimeWorkspaceRoots: null, model: null, serviceTier: null, effort: null, multiAgentMode: 'explicitRequestOnly',
@@ -66,14 +66,14 @@ test('collaboration conflicts and unsupported instructions, modes, permissions a
     { model: 'fixture/other' }, { effort: 'high' }, { reasoningEffort: 'low' },
     { config: { model_reasoning_effort: 'medium' } },
     { approvalPolicy: 'on-request' }, { permissions: ':read-only' }, { sandboxPolicy: { type: 'readOnly' } },
-    { developerInstructions: 'Custom top-level instructions' },
+    { developerInstructions: 'Custom top-level instructions' }, { personality: 'unknown' },
   ]) {
     const response = await client.raw('turn/start', { ...params, ...patch });
     assert.equal(response.error?.code, -32602, JSON.stringify(patch));
   }
   assert.deepEqual(await f.calls(), []);
-  for (const context of [undefined, null, {}, additionalContext]) {
-    const turn = await client.turn(thread.id, 'plain text', { additionalContext: context, collaborationMode,
+  for (const [context, personality] of [[undefined, null], [null, 'none'], [{}, 'friendly'], [additionalContext, 'pragmatic']]) {
+    const turn = await client.turn(thread.id, 'plain text', { additionalContext: context, personality, collaborationMode,
       model: 'fixture/%73cripted', effort: 'off', reasoningEffort: 'none', config: { model_reasoning_effort: 'off' } });
     assert.equal(turn.status, 'completed');
   }

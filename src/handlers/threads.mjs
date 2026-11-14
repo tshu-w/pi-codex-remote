@@ -83,7 +83,6 @@ export const threadsHandlers = {
   },
   async 'thread/resume'(params, emit) {
     const settings = { ...params, developerInstructions: undefined, config: { ...params.config } };
-    if (['none', 'friendly', 'pragmatic'].includes(settings.personality)) settings.personality = undefined;
     for (const key of ['apps_mcp_path_override', 'code_mode_tool_description_first', 'collaboration_modes', 'item_ids', 'image_detail_original',
       'unified_image_budget', 'mcp_oauth_refresh_coordination', 'untrusted_as_tool_output', 'image_resize_notice',
       'code_mode_interrupt', 'instant_interrupt', 'request_rule', 'image_generation', 'workspace_dependencies',

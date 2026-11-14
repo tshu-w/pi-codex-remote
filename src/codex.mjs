@@ -25,7 +25,8 @@ export function executionSettings(params) {
   if (params.approvalPolicy != null && params.approvalPolicy !== 'never') throw invalid('Pi does not enforce Codex approval policies. Use Pi extensions or omit approvalPolicy.');
   if (params.approvalsReviewer != null && params.approvalsReviewer !== 'user') throw invalid('Delegated Codex approval reviewers are not supported.');
   if (params.dynamicTools != null && (!Array.isArray(params.dynamicTools) || params.dynamicTools.length)) throw invalid('Nonempty or malformed dynamicTools are unsupported; Pi uses its native tools.');
-  for (const key of ['baseInstructions', 'developerInstructions', 'serviceTier', 'personality', 'outputSchema', 'additionalContext', 'collaborationMode', 'environments', 'selectedCapabilityRoots', 'projectId', 'mockExperimentalField']) if (params[key] != null) throw invalid(`${key} overrides are not supported by Codex Remote.`);
+  if (params.personality != null && !['none', 'friendly', 'pragmatic'].includes(params.personality)) throw invalid('personality overrides are not supported by Codex Remote.');
+  for (const key of ['baseInstructions', 'developerInstructions', 'serviceTier', 'outputSchema', 'additionalContext', 'collaborationMode', 'environments', 'selectedCapabilityRoots', 'projectId', 'mockExperimentalField']) if (params[key] != null) throw invalid(`${key} overrides are not supported by Codex Remote.`);
   if (params.summary != null && !['auto', 'concise', 'detailed'].includes(params.summary)) throw invalid('Unsupported summary control. Pi accepts auto, concise and detailed as display hints while retaining native reasoning output; disabling summaries is unsupported.');
   for (const [key, value] of Object.entries(params.config ?? {})) {
     if (['features.concurrent_reasoning_summaries', 'features.realtime_conversation'].includes(key) && typeof value === 'boolean') continue;
