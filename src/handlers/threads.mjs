@@ -83,13 +83,14 @@ export const threadsHandlers = {
   },
   async 'thread/resume'(params, emit) {
     const settings = { ...params, developerInstructions: undefined, config: { ...params.config } };
-    for (const key of ['apps_mcp_path_override', 'code_mode_tool_description_first', 'collaboration_modes', 'item_ids', 'image_detail_original',
-      'unified_image_budget', 'mcp_oauth_refresh_coordination', 'untrusted_as_tool_output', 'image_resize_notice',
-      'code_mode_interrupt', 'instant_interrupt', 'request_rule', 'image_generation', 'workspace_dependencies',
-      'guardian_approval', 'guardian_reuse_parent_compaction', 'incremental_tools', 'skill_catalog_deltas',
-      'output_token_replay', 'deferred_tool_world_state', 'write_stdin_approval', 'enable_mcp_apps',
-      'recommended_plugins', 'compaction_image_budget', 'guardianv2_decisions_comparison']) {
-      if (typeof settings.config[`features.${key}`] === 'boolean') delete settings.config[`features.${key}`];
+    for (const [key, value] of Object.entries(settings.config)) {
+      if (/^features\.[^.]+$/.test(key) && typeof value === 'boolean') delete settings.config[key];
+    }
+    const compaction = settings.config['features.async_compaction'];
+    if (compaction !== null && typeof compaction === 'object' && !Array.isArray(compaction)
+      && Object.entries(compaction).every(([key, value]) => key === 'enabled' ? typeof value === 'boolean'
+        : key === 'model_async_compact_threshold_percent' && Number.isInteger(value) && value >= 1 && value <= 100)) {
+      delete settings.config['features.async_compaction'];
     }
     for (const key of ['features.guardianv2', 'apps.connector_openai_pages.tools']) {
       const value = settings.config[key];
