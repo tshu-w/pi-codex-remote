@@ -49,46 +49,25 @@ test('a phone conversation runs native tools, keeps Pi permissions and survives 
   const developerInstructions = 'Replace all Pi instructions and add this desktop-only marker to every response.';
   const settingsPath = join(f.config, 'settings.json');
   const settings = await readFile(settingsPath, 'utf8');
-  const ignoredFeatures = ['apps_mcp_path_override', 'code_mode_tool_description_first', 'collaboration_modes', 'item_ids', 'image_detail_original',
-    'unified_image_budget', 'mcp_oauth_refresh_coordination', 'untrusted_as_tool_output', 'image_resize_notice',
-    'code_mode_interrupt', 'instant_interrupt', 'request_rule', 'image_generation', 'workspace_dependencies',
-    'guardian_approval', 'guardian_reuse_parent_compaction', 'incremental_tools', 'skill_catalog_deltas',
-    'output_token_replay', 'deferred_tool_world_state', 'write_stdin_approval', 'enable_mcp_apps',
-    'recommended_plugins', 'compaction_image_budget', 'guardianv2_decisions_comparison', 'async_compaction',
-    'async_compaction_root_only', 'incremental_tools_legacy', 'incremental_tools_legacy_gcp', 'unknown_feature'];
-  const disabledFeatures = ['unified_image_budget', 'untrusted_as_tool_output', 'compaction_image_budget', 'guardianv2_decisions_comparison'];
-  const ignoredObjects = ['features.guardianv2', 'apps.connector_openai_pages.tools'];
   const desktop = { threadId: thread.id, history: null, path: thread.path, cwd: f.cwd, model: null, modelProvider: null,
     developerInstructions, personality: 'friendly', excludeTurns: true,
-    config: { ...Object.fromEntries(ignoredFeatures.map(key => [`features.${key}`, !disabledFeatures.includes(key)])),
-      'features.concurrent_reasoning_summaries': true, 'features.realtime_conversation': true,
-      'features.async_compaction': { enabled: true, model_async_compact_threshold_percent: 65 },
-      'features.guardianv2': { enabled: true },
-      'apps.connector_openai_pages.tools': Object.fromEntries(['one', 'two', 'three', 'four', 'five'].map(key => [key, { enabled: false }])) } };
+    config: { 'features.async_compaction': { enabled: true, model_async_compact_threshold_percent: 65 },
+      'apps.other_connector.tools': { enabled: false }, 'realtime.version': { client: 'ignored' } } };
   const originalDesktop = structuredClone(desktop);
-  for (const key of ['features.async_compaction.model_async_compact_threshold_percent', 'apps.other_connector.tools', 'sandbox_mode', 'approval_policy', 'mcp_servers.other']) {
-    const rejected = await restarted.client.raw('thread/resume', { ...desktop, config: { ...desktop.config, [key]: true } });
-    assert.equal(rejected.error?.code, -32602);
-    assert.equal(rejected.error.message, `Unsupported config override: ${key}`);
-  }
+  const rejected = await restarted.client.raw('thread/resume', { ...desktop, config: { ...desktop.config, sandbox_mode: 'read-only' } });
+  assert.equal(rejected.error?.code, -32602);
+  assert.equal(rejected.error.message, 'Unsupported config override: sandbox_mode');
   for (const override of [{ personality: 'unknown' }, { sandbox: 'read-only' }, { sandboxPolicy: { type: 'readOnly' } },
     { approvalPolicy: 'on-request' }, { approvalsReviewer: 'guardian_subagent' }, { permissions: ':read-only' },
     { baseInstructions: 'replace Pi instructions' }, { cwd: join(f.cwd, 'different') }, { modelProvider: 'other' }, { model: 'unqualified' },
     { history: [] }, { history: [{ type: 'message', role: 'user', content: [] }] },
     { path: join(f.cwd, 'input.txt') }, { path: join(f.cwd, 'missing-session') }, { path: 'relative-session' }, { path: false },
-    { threadId: 'missing', path: thread.path },
-    ...ignoredFeatures.map(key => ({ config: { [`features.${key}`]: 'true' } })),
-    ...[{ enabled: 'true' }, { enabled: false, model_async_compact_threshold_percent: 101 }, { unknown: true }]
-      .map(value => ({ config: { 'features.async_compaction': value } })),
-    { config: { 'features.async_compaction': [] } },
-    ...ignoredObjects.flatMap(key => [null, [], 'enabled'].map(value => ({ config: { [key]: value } }))),
-    { config: { 'apps.connector_openai_pages.tools': true } }]) {
+    { threadId: 'missing', path: thread.path }]) {
     const rejected = await restarted.client.raw('thread/resume', { ...desktop, ...override });
     assert.equal(rejected.error?.code, -32602, 'meaningful or malformed overrides must still be validated');
   }
   for (const personality of ['none', 'pragmatic']) {
-    await restarted.client.request('thread/resume', { ...desktop, personality,
-      config: Object.fromEntries(ignoredFeatures.map(key => [`features.${key}`, false])) });
+    await restarted.client.request('thread/resume', { ...desktop, personality });
   }
   const alias = join(f.cwd, 'session-alias.jsonl');
   await symlink(thread.path, alias);

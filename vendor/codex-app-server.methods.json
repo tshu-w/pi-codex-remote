@@ -1,5 +1,5 @@
 {
-  "version": "0.167.0-alpha.3.2",
+  "version": "0.169.0-alpha.11.1",
   "requests": {
     "initialize": {
       "response": "#/definitions/InitializeResponse",
@@ -281,6 +281,10 @@
       "response": "#/definitions/v2/ThreadInjectItemsResponse",
       "experimental": false
     },
+    "thread/prepareApprovedPlan": {
+      "response": "#/definitions/v2/ThreadPrepareApprovedPlanResponse",
+      "experimental": true
+    },
     "skills/list": {
       "response": "#/definitions/v2/SkillsListResponse",
       "experimental": false
@@ -473,6 +477,14 @@
       "response": "#/definitions/v2/GatewayOAuthCancelResponse",
       "experimental": false
     },
+    "modelProvider/list": {
+      "response": "#/definitions/v2/ModelProviderListResponse",
+      "experimental": false
+    },
+    "modelProvider/config/write": {
+      "response": "#/definitions/v2/ModelProviderConfigWriteResponse",
+      "experimental": false
+    },
     "modelProvider/capabilities/read": {
       "response": "#/definitions/v2/ModelProviderCapabilitiesReadResponse",
       "experimental": false
@@ -607,6 +619,10 @@
     },
     "account/logout": {
       "response": "#/definitions/v2/LogoutAccountResponse",
+      "experimental": false
+    },
+    "account/securitySetup/read": {
+      "response": "#/definitions/v2/GetAccountSecuritySetupResponse",
       "experimental": false
     },
     "account/rateLimits/read": {

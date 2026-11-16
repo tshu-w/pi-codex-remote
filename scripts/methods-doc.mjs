@@ -23,7 +23,7 @@ const features = [
     ['thread/goal/get', 'threadSection/list', 'collaborationMode/list'],
     ['thread/goal/*', 'threadSection/*', 'thread/section/move', 'project/*'],
     ['thread/realtime/*', 'thread/sample', 'thread/sample/cancel', 'thread/prediction/request'],
-    ['turn/settings/update', 'review/start', 'thread/inject_items'],
+    ['turn/settings/update', 'review/start', 'thread/inject_items', 'thread/prepareApprovedPlan'],
     ['thread/increment_elicitation', 'thread/decrement_elicitation', 'thread/approveGuardianDeniedAction', 'thread/guardianReview'],
   ]],
   ['Commands and files', [
@@ -38,6 +38,7 @@ const features = [
   ['Models, configuration and extensions', [
     ['model/list'],
     ['modelProvider/capabilities/read'],
+    ['modelProvider/*'],
     ['permissionProfile/list', 'configRequirements/read'],
     ['config/read'],
     ['skills/list'],

@@ -82,21 +82,7 @@ export const threadsHandlers = {
     return { thread: await this.thread(params.threadId, params.includeTurns) };
   },
   async 'thread/resume'(params, emit) {
-    const settings = { ...params, developerInstructions: undefined, config: { ...params.config } };
-    for (const [key, value] of Object.entries(settings.config)) {
-      if (/^features\.[^.]+$/.test(key) && typeof value === 'boolean') delete settings.config[key];
-    }
-    const compaction = settings.config['features.async_compaction'];
-    if (compaction !== null && typeof compaction === 'object' && !Array.isArray(compaction)
-      && Object.entries(compaction).every(([key, value]) => key === 'enabled' ? typeof value === 'boolean'
-        : key === 'model_async_compact_threshold_percent' && Number.isInteger(value) && value >= 1 && value <= 100)) {
-      delete settings.config['features.async_compaction'];
-    }
-    for (const key of ['features.guardianv2', 'apps.connector_openai_pages.tools']) {
-      const value = settings.config[key];
-      if (value !== null && typeof value === 'object' && !Array.isArray(value)) delete settings.config[key];
-    }
-    const effort = executionSettings(settings);
+    const effort = executionSettings({ ...params, developerInstructions: undefined });
     if (params.history != null) throw invalid('History overrides are unsupported; resume by threadId.');
     if (params.path != null && typeof params.path !== 'string') throw invalid('Resume path must be a string.');
     if (!this.catalog.has(params.threadId)) await this.discover();

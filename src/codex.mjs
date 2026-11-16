@@ -29,8 +29,7 @@ export function executionSettings(params) {
   for (const key of ['baseInstructions', 'developerInstructions', 'serviceTier', 'outputSchema', 'additionalContext', 'collaborationMode', 'environments', 'selectedCapabilityRoots', 'projectId', 'mockExperimentalField']) if (params[key] != null) throw invalid(`${key} overrides are not supported by Codex Remote.`);
   if (params.summary != null && !['auto', 'concise', 'detailed'].includes(params.summary)) throw invalid('Unsupported summary control. Pi accepts auto, concise and detailed as display hints while retaining native reasoning output; disabling summaries is unsupported.');
   for (const [key, value] of Object.entries(params.config ?? {})) {
-    if (['features.concurrent_reasoning_summaries', 'features.realtime_conversation'].includes(key) && typeof value === 'boolean') continue;
-    if (key === 'realtime.version' && (value == null || typeof value === 'string' || typeof value === 'number')) continue;
+    if (/^(features|apps|realtime)\./.test(key)) continue;
     if (key === 'experimental_realtime_ws_model' && (value == null || typeof value === 'string')) continue;
     if (key === 'model_reasoning_effort' && (value == null || typeof value === 'string')) continue;
     throw invalid(`Unsupported config override: ${key}`);

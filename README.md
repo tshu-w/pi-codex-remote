@@ -34,7 +34,7 @@ See [METHODS.md](METHODS.md) for supported interfaces.
 
 ## Development
 
-`vendor/` holds the app-server schema for Codex Remote's Codex version. After upgrading the Codex CLI, regenerate the protocol definitions and `METHODS.md`, then run the tests.
+`vendor/` tracks the Codex App's bundled app-server schema. With its `codex` executable on `PATH`, regenerate the protocol definitions and `METHODS.md`, then run the tests.
 
 ```sh
 node scripts/update-protocol.mjs

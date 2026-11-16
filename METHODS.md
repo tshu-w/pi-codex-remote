@@ -1,6 +1,6 @@
 # Codex app-server methods
 
-Generated from the Codex 0.167.0-alpha.3.2 schema and `src/methods.mjs`. 48 implemented, 10 empty, 123 unimplemented. Full definitions and experimental markers are in [vendor/](vendor/).
+Generated from the Codex 0.169.0-alpha.11.1 schema and `src/methods.mjs`. 48 implemented, 10 empty, 127 unimplemented. Full definitions and experimental markers are in [vendor/](vendor/).
 Empty methods return no resources; unimplemented requests return -32601. Wildcards cover methods not already listed above them.
 
 ## Sessions and history
@@ -8,7 +8,7 @@ Empty methods return no resources; unimplemented requests return -32601. Wildcar
 | Methods | Status | Limits and behavior |
 | --- | --- | --- |
 | `thread/start`, `thread/unsubscribe` | implemented |  |
-| `thread/resume` | implemented | Sessions open in another Pi are read-only, unless a pi-agents host has them; path must match threadId; history overrides are unsupported. developerInstructions and named compatibility settings are ignored |
+| `thread/resume` | implemented | Sessions open in another Pi are read-only, unless a pi-agents host has them; path must match threadId; history overrides are unsupported. developerInstructions, features.*, apps.* and realtime.* config overrides are ignored; other config overrides that Pi cannot honor are rejected |
 | `thread/fork` | implemented | Whole thread, through a turn, or before a turn |
 | `thread/archive`, `thread/unarchive`, `thread/delete` | implemented | Moves the session file to the macOS Trash; Restores the session file from the Trash; Moves the session file to the macOS Trash and removes the thread from Codex Remote |
 | `thread/name/set` | implemented |  |
@@ -30,7 +30,7 @@ Empty methods return no resources; unimplemented requests return -32601. Wildcar
 | `thread/goal/get`, `threadSection/list`, `collaborationMode/list` | empty |  |
 | `thread/goal/*`, `threadSection/*`, `thread/section/move`, `project/*` | unimplemented |  |
 | `thread/realtime/*`, `thread/sample`, `thread/sample/cancel`, `thread/prediction/request` | unimplemented |  |
-| `turn/settings/update`, `review/start`, `thread/inject_items` | unimplemented |  |
+| `turn/settings/update`, `review/start`, `thread/inject_items`, `thread/prepareApprovedPlan` | unimplemented |  |
 | `thread/increment_elicitation`, `thread/decrement_elicitation`, `thread/approveGuardianDeniedAction`, `thread/guardianReview` | unimplemented |  |
 
 ## Commands and files
@@ -51,6 +51,7 @@ Empty methods return no resources; unimplemented requests return -32601. Wildcar
 | --- | --- | --- |
 | `model/list` | implemented | Pi scope plus current/subscribed models; includeHidden or no scope returns all available models |
 | `modelProvider/capabilities/read` | implemented | Codex provider capability flags are false; this does not restrict Pi tools |
+| `modelProvider/*` | unimplemented |  |
 | `permissionProfile/list`, `configRequirements/read` | implemented | Only :danger-full-access; Pi permission hooks still apply; Only Pi execution without a Codex sandbox |
 | `config/read` | implemented | Current Pi model and thinking level; no Codex config layers |
 | `skills/list` | implemented | Pi skills, read-only |
