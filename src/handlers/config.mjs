@@ -77,7 +77,8 @@ export const configHandlers = {
       }
     }
     const visible = model => !scoped || scoped.has(modelKey(model));
-    const page = offsetPage(params.includeHidden ? models : models.filter(visible), params, 100);
+    const visibleModels = models.filter(visible);
+    const page = offsetPage(params.includeHidden ? [...visibleModels, ...models.filter(model => !visible(model))] : visibleModels, params, 100);
     return {
       data: page.data.map(model => {
         const key = modelKey(model);

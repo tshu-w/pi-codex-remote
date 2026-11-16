@@ -10,7 +10,7 @@ import { setup } from './harness.mjs';
 test('model/list scopes defaults, retains client session models and paginates after filtering', async () => {
   const models = ['scoped', 'default', 'loaded', 'saved', 'other'].map(id => ({ provider: 'fixture', id, input: ['text'] }));
   const emit = () => {};
-  const rpc = { modelScope: [models[0]], state: { model: models[1] }, request: async () => ({ models }) };
+  const rpc = { modelScope: [models[0]], state: { model: models[1] }, request: async () => ({ models: [models[4], ...models.slice(0, 4)] }) };
   const protocol = {
     probeRpc: async () => rpc,
     subscribers: new Map([['loaded', new Set([emit])], ['saved', new Set([emit])], ['other', new Set([() => {}])]]),
@@ -22,6 +22,7 @@ test('model/list scopes defaults, retains client session models and paginates af
   const second = await list({ limit: 2, cursor: first.nextCursor });
   assert.deepEqual([...first.data, ...second.data].map(model => model.id), ['fixture/scoped', 'fixture/default', 'fixture/loaded', 'fixture/saved']);
   assert.equal(second.nextCursor, null);
+  assert.deepEqual((await list({ includeHidden: true, limit: 4 })).data, [...first.data, ...second.data]);
   const hidden = await list({ includeHidden: true });
   assert.deepEqual(hidden.data.filter(model => model.hidden).map(model => model.id), ['fixture/other']);
   rpc.modelScope = [];
