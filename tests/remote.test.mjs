@@ -157,6 +157,37 @@ test('closed stream state keeps only the most recent streams', async t => {
   assert.equal(instance.sequences.get('client\0stream-299'), 1);
 });
 
+test('state writes coalesce while preserving callers\' snapshot boundaries', async t => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'codex-remote-state-'));
+  t.after(() => rm(stateDir, { recursive: true, force: true }));
+  const instance = new Remote({ stateDir, handle() {} });
+  t.after(() => instance.dispatcher.destroy());
+  await instance.initialize();
+  const snapshots = [];
+  let started;
+  instance.state = { cursor: 'first', toJSON() {
+    snapshots.push(this.cursor);
+    started?.();
+    return { cursor: this.cursor };
+  } };
+  await Promise.all(Array.from({ length: 20 }, () => instance.persist()));
+  assert.deepEqual(snapshots, ['first']);
+
+  const writing = new Promise(resolve => { started = resolve; });
+  instance.state.cursor = 'second';
+  const first = instance.persist();
+  await writing;
+  instance.state.cursor = 'third';
+  let resolved = false;
+  const next = Array.from({ length: 20 }, () => instance.persist());
+  const completed = next[0].then(() => { resolved = true; });
+  await first;
+  assert.equal(resolved, false);
+  await Promise.all([...next, completed]);
+  assert.deepEqual(snapshots, ['first', 'second', 'third']);
+  assert.equal(JSON.parse(await readFile(instance.file, 'utf8')).cursor, 'third');
+});
+
 test('a failed state write does not stop later ones', async t => {
   const stateDir = await mkdtemp(join(tmpdir(), 'codex-remote-state-'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));
@@ -165,7 +196,10 @@ test('a failed state write does not stop later ones', async t => {
   await instance.initialize();
   const file = instance.file;
   instance.file = join(stateDir, 'missing', 'remote.json');
-  await assert.rejects(instance.persist());
+  await Promise.all([
+    assert.rejects(instance.persist(), { code: 'ENOENT' }),
+    assert.rejects(instance.persist(), { code: 'ENOENT' }),
+  ]);
   instance.file = file;
   instance.state.cursor = 'after';
   await instance.persist();

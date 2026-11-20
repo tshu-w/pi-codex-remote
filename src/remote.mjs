@@ -69,7 +69,11 @@ export class Remote {
   }
 
   persist() {
-    this.saving = this.saving.catch(() => {}).then(() => store(this.file, this.state));
+    if (this.scheduledSave) return this.scheduledSave;
+    this.saving = this.scheduledSave = this.saving.catch(() => {}).then(() => {
+      this.scheduledSave = undefined;
+      return store(this.file, this.state);
+    });
     return this.saving;
   }
 
